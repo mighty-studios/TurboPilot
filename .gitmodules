@@ -1,0 +1,3 @@
+[submodule "src/submodules/turboland-wpf"]
+	path = src/submodules/turboland-wpf
+	url = https://github.com/mighty-studios/TurbolandWPF.git
