@@ -1,0 +1,7 @@
+<Application x:Class="TurboPilot.App"
+			 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+			 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+	<!-- No StartupUri: the theme must be applied before the first window is
+	     constructed, because TurbolandWindow resolves its style from application
+	     resources at construction time. App.OnStartup does both, in that order. -->
+</Application>
