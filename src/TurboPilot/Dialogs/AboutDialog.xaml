@@ -19,6 +19,8 @@
 		     shadow is painted outside its layout box, so without the gap each
 		     shadow lands on its neighbor. -->
 		<StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+			<Button Content="Website" Click="OnWebsite"
+					Margin="{DynamicResource Turboland.Size.ButtonStripMargin}"/>
 			<Button Content="OK" IsDefault="True" IsCancel="True" Click="OnOk"
 					Margin="{DynamicResource Turboland.Size.ButtonStripMargin}"/>
 		</StackPanel>

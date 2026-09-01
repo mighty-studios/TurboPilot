@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Reflection;
 using System.Windows;
 using TurbolandTheme.Wpf.Controls;
@@ -5,8 +6,8 @@ using TurbolandTheme.Wpf.Controls;
 namespace TurboPilot.Dialogs;
 
 /// <summary>
-/// The About box: a message over a single OK button, shown on the main
-/// window's in-client dialog host.
+/// The About box: a message over a Website and an OK button, shown on the
+/// main window's in-client dialog host.
 /// </summary>
 public partial class AboutDialog : TurbolandDialog
 {
@@ -16,7 +17,21 @@ public partial class AboutDialog : TurbolandDialog
 		Message.Text = BuildMessage();
 	}
 
+	/// <summary>
+	/// The URL the Website button opens in the default browser. Assign before
+	/// showing the dialog; an empty or invalid value leaves the button inert.
+	/// </summary>
+	public string WebsiteUrl { get; set; } = "https://github.com/mighty-studios/TurboPilot";
+
 	private void OnOk(object sender, RoutedEventArgs e) => Close(true);
+
+	private void OnWebsite(object sender, RoutedEventArgs e)
+	{
+		if (!Uri.TryCreate(WebsiteUrl, UriKind.Absolute, out Uri? uri))
+			return;
+
+		Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
+	}
 
 	private static string BuildMessage()
 	{
@@ -27,10 +42,14 @@ public partial class AboutDialog : TurbolandDialog
 			"TURBO-PILOT",
 			$"Version {version.Major}.{version.Minor}.{version.Build}",
 			"",
-			"A retro interface for working with LLM models.",
-			"Remote services: Copilot CLI, OpenAI-compatible servers.",
-			"Mediator AI: on-device model via Microsoft Foundry Local.",
+			"An open-source retro interface for working with LLM models.",
 			"",
-			"Copyright (c) 2026 Mighty Studios");
+			"Copyright (c) 2026 Mighty Studios",
+			"www.mightystudios.com",
+			"https://github.com/mighty-studios/TurboPilot",
+			"",
+			"TurbolandWPF UI Theme includes the font 'Px437 IBM VGA 9x16'",
+			"by VileR, https://int10h.org/oldschool-pc-fonts/",
+			"used under license [CC BY-SA 4.0]");
 	}
 }

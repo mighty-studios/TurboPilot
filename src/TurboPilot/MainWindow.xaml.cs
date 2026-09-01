@@ -24,6 +24,9 @@ public partial class MainWindow : TurbolandWindow
 			return;
 		}
 
-		Dialogs.Show(new AboutDialog());
+		Dialogs.Show(new AboutDialog
+		{
+			WebsiteUrl = "https://github.com/mighty-studios/TurboPilot"
+		});
 	}
 }
