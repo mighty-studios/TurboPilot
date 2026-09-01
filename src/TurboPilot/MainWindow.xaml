@@ -15,7 +15,7 @@
 				<MenuItem Header="E_xit"/>
 			</MenuItem>
 			<MenuItem Header="_Help">
-				<MenuItem Header="_About..."/>
+				<MenuItem Header="_About..." Click="OnAbout"/>
 			</MenuItem>
 		</Menu>
 
@@ -23,9 +23,17 @@
 			<StatusBarItem Content="Ready"/>
 		</StatusBar>
 
-		<GroupBox Header="Output" Margin="4">
-			<TextBlock Text="TurboPilot is running." Margin="8"/>
-		</GroupBox>
+		<!-- The blue desktop. The dialog host is a sibling laid over the content
+		     in the same grid cell, so dialogs float above the output but never
+		     over the menu or status bar. It is invisible and click-through
+		     until a dialog is actually opened. -->
+		<Grid>
+			<GroupBox Header="Output" Margin="4">
+				<TextBlock Text="TurboPilot is running." Margin="8"/>
+			</GroupBox>
+
+			<ctl:TurbolandDialogHost x:Name="Dialogs"/>
+		</Grid>
 
 	</DockPanel>
 

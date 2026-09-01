@@ -1,0 +1,26 @@
+<ctl:TurbolandDialog x:Class="TurboPilot.Dialogs.AboutDialog"
+					xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+					xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+					xmlns:ctl="clr-namespace:TurbolandTheme.Wpf.Controls;assembly=TurbolandTheme.Wpf"
+					Title="About TurboPilot">
+
+	<!-- The About box: a message over a single OK button. Everything inside the
+	     frame is a stock WPF control picking up an implicit style; the dialog
+	     contributes the chrome, the drag and shade behavior, and the soft
+	     modality. The dialog sizes to this content; nothing here sets a width
+	     or a height. -->
+
+	<StackPanel>
+		<TextBlock x:Name="Message"/>
+
+		<!-- IsDefault and IsCancel are WPF's own: Enter and Escape reach the
+		     button through the dialog's focus scope without this app handling
+		     a single key. ButtonStripMargin is not decoration: a button's
+		     shadow is painted outside its layout box, so without the gap each
+		     shadow lands on its neighbor. -->
+		<StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+			<Button Content="OK" IsDefault="True" IsCancel="True" Click="OnOk"
+					Margin="{DynamicResource Turboland.Size.ButtonStripMargin}"/>
+		</StackPanel>
+	</StackPanel>
+</ctl:TurbolandDialog>
