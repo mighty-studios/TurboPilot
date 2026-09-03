@@ -541,4 +541,24 @@ public partial class MainWindow : TurbolandWindow
 			WebsiteUrl = "https://github.com/mighty-studios/TurboPilot"
 		});
 	}
+
+	// ── History navigation stubs ─────────────────────────────────────────────
+
+	/// <summary>
+	/// Handles the Previous (▲) history button click.
+	/// TODO: Implement prompt history cycling to older prompts.
+	/// </summary>
+	private void ButtonHistoryPrev_Click(object sender, RoutedEventArgs e)
+	{
+		// TODO: Navigate to the previous (older) prompt in history
+	}
+
+	/// <summary>
+	/// Handles the Next (▼) history button click.
+	/// TODO: Implement prompt history cycling to newer prompts.
+	/// </summary>
+	private void ButtonHistoryNext_Click(object sender, RoutedEventArgs e)
+	{
+		// TODO: Navigate to the next (newer) prompt in history
+	}
 }
