@@ -2,12 +2,22 @@
 
 	<PropertyGroup>
 		<OutputType>WinExe</OutputType>
-		<TargetFramework>net9.0-windows7.0</TargetFramework>
+		<!-- net9.0-windows10.0.18362.0 (Win10 18362+) is required by the
+		     Microsoft.AI.Foundry.Local.WinML package (net8.0-windows10.0.18362)
+		     used for the Mediator's on-device local model. -->
+		<TargetFramework>net9.0-windows10.0.18362.0</TargetFramework>
 		<Nullable>enable</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<UseWPF>true</UseWPF>
 		<RootNamespace>TurboPilot</RootNamespace>
 		<ApplicationManifest>app.manifest</ApplicationManifest>
+	</PropertyGroup>
+
+	<PropertyGroup>
+		<!-- The Foundry Local WinML package requires a RuntimeIdentifier (it ships
+		     per-RID native libraries). Default to the host machine's RID so a
+		     plain `dotnet build`/`dotnet restore` is RID-aware and portable. -->
+		<RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">$(NETCoreSdkRuntimeIdentifier)</RuntimeIdentifier>
 	</PropertyGroup>
 
 	<PropertyGroup>
@@ -22,12 +32,22 @@
 	<ItemGroup>
 		<PackageReference Include="GitHub.Copilot.SDK" Version="1.0.11" />
 		<PackageReference Include="OpenAI" Version="2.13.0" />
-		<PackageReference Include="Microsoft.Agents.AI" Version="1.19.0" />
+		<!-- Mediator on-device local model hosting (Foundry Local, WinML for
+		     GPU/NPU acceleration). Replaces the former Microsoft.Agents.AI
+		     reference. -->
+		<PackageReference Include="Microsoft.AI.Foundry.Local.WinML" Version="1.2.4" />
 		<PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />
 	</ItemGroup>
 
 	<ItemGroup>
 		<ProjectReference Include="..\submodules\turboland-wpf\src\TurbolandTheme.Wpf\TurbolandTheme.Wpf.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<!-- Bundled web assets for the Rendered output tab. -->
+		<None Include="web\**">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</None>
 	</ItemGroup>
 
 </Project>

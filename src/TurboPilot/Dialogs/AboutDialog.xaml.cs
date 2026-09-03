@@ -44,12 +44,14 @@ public partial class AboutDialog : TurbolandDialog
 			"",
 			"An open-source retro interface for working with LLM models.",
 			"",
+			"TurbolandWPF UI Theme includes the font 'Px437 IBM VGA 9x16'",
+			"by VileR, https://int10h.org/oldschool-pc-fonts/",
+			"used under license [CC BY-SA 4.0]",
+			"",
 			"Copyright (c) 2026 Mighty Studios",
 			"www.mightystudios.com",
 			"https://github.com/mighty-studios/TurboPilot",
-			"",
-			"TurbolandWPF UI Theme includes the font 'Px437 IBM VGA 9x16'",
-			"by VileR, https://int10h.org/oldschool-pc-fonts/",
-			"used under license [CC BY-SA 4.0]");
+			""
+			);
 	}
 }

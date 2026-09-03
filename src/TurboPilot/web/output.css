@@ -1,0 +1,598 @@
+/* GoPilot Output — Dark Theme
+ * Colours match AppTheme.cs
+ */
+
+* {
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
+}
+
+html, body {
+	background: #000000;
+	color: #d2d2d2;
+	font-family: "Segoe UI", -apple-system, sans-serif;
+	font-size: 12px;
+	line-height: 1.5;
+	overflow-x: hidden;
+}
+
+#output {
+	padding: 8px 12px;
+}
+
+/* ── Message blocks ─────────────────────────────────────────────── */
+
+.block {
+	margin-bottom: 6px;
+	padding: 4px 0;
+}
+
+.block-label {
+	font-weight: 600;
+	margin-bottom: 2px;
+}
+
+/* User prompt */
+.block-user .block-label {
+	color: #64a0dc;
+}
+.block-user .block-content {
+	white-space: pre-wrap;
+}
+
+/* Assistant response */
+.block-assistant .block-label {
+	color: #64be64;
+}
+.block-assistant .block-content {
+	color: #d2d2d2;
+}
+
+/* Auto-detected image thumbnails appended beneath image-path mentions. */
+.block-assistant .block-content img {
+	max-width: 320px;
+	max-height: 240px;
+	margin: 4px 0;
+	border: 1px solid #333;
+	border-radius: 4px;
+	background: #1a1a1a;
+	display: block;
+	cursor: zoom-in;
+}
+.block-assistant .block-content img.kp-img-broken {
+	display: none;
+}
+
+/* Pasted-image thumbnails shown beneath the user's prompt echo.
+   Live in a dedicated sibling div (.block-images) so they aren't
+   wiped by any future content updates to .block-content. */
+.block-user .block-images {
+	margin-top: 6px;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+.block-user .block-images img.kp-pasted-image {
+	max-width: 240px;
+	max-height: 180px;
+	border: 1px solid #333;
+	border-radius: 4px;
+	background: #1a1a1a;
+	display: block;
+	cursor: zoom-in;
+}
+.block-user .block-images img.kp-pasted-image.kp-img-broken {
+	display: none;
+}
+
+/* Reasoning */
+.block-reasoning .block-label {
+	color: #9494d2;
+}
+.block-reasoning .block-content {
+	color: #9494d2;
+	font-style: italic;
+}
+
+/* Tool activity */
+.block-tool {
+	color: #cdb45a;
+	font-family: "Consolas", "Cascadia Mono", monospace;
+	font-size: 13px;
+}
+.block-tool .tool-success {
+	color: #64be64;
+}
+.block-tool .tool-failure {
+	color: #d74b4b;
+}
+.block-tool .tool-dim {
+	color: #a08c41;
+}
+
+/* Sub-agent */
+.block-subagent {
+	color: #82b4d2;
+	font-family: "Consolas", "Cascadia Mono", monospace;
+	font-size: 13px;
+}
+.block-subagent .subagent-complete {
+	color: #64be64;
+}
+.block-subagent .subagent-failed {
+	color: #d74b4b;
+}
+
+/* Error */
+.block-error {
+	color: #d74b4b;
+}
+.block-error .block-content {
+	white-space: pre-wrap;
+}
+
+/* Status / meta */
+.block-status {
+	color: #8c8c8c;
+}
+.block-status .block-content {
+	white-space: pre-wrap;
+	font-family: "Consolas", "Cascadia Mono", monospace;
+	font-size: 13px;
+}
+
+/* ── Markdown content styling ───────────────────────────────────── */
+
+.block-content h1,
+.block-content h2,
+.block-content h3,
+.block-content h4 {
+	color: #e0e0e0;
+	margin-top: 12px;
+	margin-bottom: 6px;
+}
+.block-content h1 { font-size: 1.4em; border-bottom: 1px solid #333; padding-bottom: 4px; }
+.block-content h2 { font-size: 1.2em; border-bottom: 1px solid #2a2a2a; padding-bottom: 3px; }
+.block-content h3 { font-size: 1.1em; }
+
+.block-content p {
+	margin-bottom: 8px;
+}
+
+.block-content ul,
+.block-content ol {
+	margin-left: 20px;
+	margin-bottom: 8px;
+}
+
+.block-content li {
+	margin-bottom: 2px;
+}
+
+.block-content a {
+	color: #64a0dc;
+	text-decoration: none;
+}
+.block-content a:hover {
+	text-decoration: underline;
+}
+
+/* File-path links emitted by FilePathLinkTransformer.
+   Left-click opens the file, right-click reveals it in Explorer.
+   The pointer cursor and tinted underline make it obvious the text
+   is interactive without making it shout louder than ordinary
+   markdown links. The selector matches anchors whose href targets
+   our custom scheme (either bare "kp-path:" or marked.js's URL-
+   normalised "kp-path%3A" form). */
+.block-content a[href^="kp-path:" i],
+.block-content a[href^="kp-path%3A" i] {
+	color: #6fb0c8;
+	text-decoration: underline dotted;
+	text-underline-offset: 2px;
+	cursor: pointer;
+}
+.block-content a[href^="kp-path:" i]:hover,
+.block-content a[href^="kp-path%3A" i]:hover {
+	color: #9adff0;
+	text-decoration: underline solid;
+}
+
+.block-content strong {
+	color: #e0e0e0;
+}
+
+.block-content em {
+	font-style: italic;
+}
+
+/* Inline code */
+.block-content code {
+	background: #1a1a1a;
+	color: #e0a050;
+	padding: 1px 5px;
+	border-radius: 3px;
+	font-family: "Consolas", "Cascadia Mono", monospace;
+	font-size: 0.92em;
+}
+
+/* Fenced code blocks. Native scroll (no pan/zoom) so the user can
+ * select, copy and paste freely. Pan/zoom is reserved for graphics
+ * (Mermaid SVGs); see .kp-zoom-wrap below. */
+.block-content pre {
+	background: #0d0d0d;
+	border: 1px solid #252525;
+	border-radius: 4px;
+	padding: 10px 12px;
+	margin: 8px 0;
+	overflow: auto;
+	max-height: 480px;
+}
+.block-content pre code {
+	background: none;
+	color: inherit;
+	padding: 0;
+	border-radius: 0;
+	font-size: 13px;
+	line-height: 1.45;
+}
+
+/* Tables */
+.block-content table {
+	border-collapse: collapse;
+	margin: 8px 0;
+	width: 100%;
+}
+.block-content th,
+.block-content td {
+	border: 1px solid #333;
+	padding: 5px 10px;
+	text-align: left;
+}
+.block-content th {
+	background: #1a1a1a;
+	color: #e0e0e0;
+	font-weight: 600;
+}
+.block-content tr:nth-child(even) {
+	background: #0a0a0a;
+}
+
+/* Blockquotes */
+.block-content blockquote {
+	border-left: 3px solid #444;
+	color: #aaa;
+	padding-left: 12px;
+	margin: 8px 0;
+}
+
+/* Horizontal rules */
+.block-content hr {
+	border: none;
+	border-top: 1px solid #333;
+	margin: 12px 0;
+}
+
+/* Mermaid diagrams */
+.mermaid-container {
+	background: #0d0d0d;
+	border: 1px solid #252525;
+	border-radius: 4px;
+	padding: 12px;
+	margin: 8px 0;
+	text-align: center;
+}
+.mermaid-container svg {
+	max-width: 100%;
+}
+
+/* Native-scroll wrapper for oversized text content (currently tables).
+ * Unlike .kp-zoom-wrap this does NOT intercept wheel/mouse events,
+ * so text selection, copy and paste continue to work. */
+.kp-scroll-wrap {
+	margin: 8px 0;
+	overflow: auto;
+	max-height: 480px;
+	border: 1px solid #252525;
+	border-radius: 4px;
+}
+.kp-scroll-wrap > table {
+	margin: 0;
+	border-radius: 0;
+}
+
+/* ── Pan / Zoom wrapper (graphics only: Mermaid SVGs) ───────────── */
+
+.kp-zoom-wrap {
+	position: relative;
+	margin: 8px 0;
+	background: #0d0d0d;
+	border: 1px solid #252525;
+	border-radius: 4px;
+	overflow: hidden;
+}
+
+.kp-zoom-viewport {
+	overflow: hidden;
+	cursor: grab;
+	max-height: 480px;
+	min-height: 80px;
+}
+.kp-zoom-viewport.kp-zoom-dragging {
+	cursor: grabbing;
+}
+
+.kp-zoom-inner {
+	transform-origin: 0 0;
+	display: inline-block;
+	min-width: 100%;
+}
+
+/* When wrapping graphical content, suppress its inherent scroll/border. */
+.kp-zoom-mermaid .kp-zoom-inner > .mermaid-container {
+	background: transparent;
+	border: none;
+	padding: 12px;
+	margin: 0;
+	text-align: left;
+}
+.kp-zoom-mermaid .kp-zoom-inner > .mermaid-container svg {
+	max-width: none;
+	display: block;
+}
+
+/* Toolbar */
+.kp-zoom-toolbar {
+	position: absolute;
+	top: 4px;
+	right: 4px;
+	display: flex;
+	gap: 2px;
+	background: rgba(20, 20, 20, 0.85);
+	border: 1px solid #333;
+	border-radius: 3px;
+	padding: 2px;
+	opacity: 0;
+	transition: opacity 0.15s ease;
+	z-index: 2;
+}
+.kp-zoom-wrap:hover .kp-zoom-toolbar,
+.kp-zoom-wrap.kp-zoom-full .kp-zoom-toolbar {
+	opacity: 1;
+}
+
+.kp-zb {
+	background: #1a1a1a;
+	color: #d2d2d2;
+	border: 1px solid #333;
+	border-radius: 2px;
+	padding: 2px 6px;
+	font-family: "Segoe UI", sans-serif;
+	font-size: 12px;
+	line-height: 1.2;
+	cursor: pointer;
+	min-width: 22px;
+}
+.kp-zb:hover {
+	background: #2a2a2a;
+	border-color: #4a4a4a;
+}
+
+/* Fullscreen overlay */
+.kp-zoom-wrap.kp-zoom-full {
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	margin: 0;
+	border-radius: 0;
+	z-index: 9999;
+	background: #000;
+}
+.kp-zoom-wrap.kp-zoom-full .kp-zoom-viewport {
+	max-height: none;
+	height: 100vh;
+}
+body.kp-zoom-body-locked {
+	overflow: hidden;
+}
+
+/* Session divider */
+.block-divider {
+	border: none;
+	border-top: 1px dashed #444;
+	margin: 12px 0;
+	color: #8c8c8c;
+	text-align: center;
+	font-size: 12px;
+}
+
+/* ── Collapsible sections (Reasoning / Tool group) ────────────────── */
+
+/*
+ * Sections wrap consecutive Reasoning or Tool events into a single
+ * <details> block. They start open and visually deemphasised; once the
+ * section ends (next-different-kind event or idle timeout) the body is
+ * collapsed and the summary is rewritten with a smart one-liner.
+ *
+ * Layout per section:
+ *   <details class="kp-section kp-section-reasoning kp-section-active" open>
+ *     <summary class="kp-section-summary">Reasoning&hellip;</summary>
+ *     <div class="kp-section-body">
+ *        ...streaming markdown / tool lines...
+ *     </div>
+ *   </details>
+ */
+
+.kp-section {
+	margin: 6px 0;
+	background: #0a0a0a;
+	border: 1px solid #1f1f1f;
+	border-left: 2px solid #2a2a2a;
+	border-radius: 3px;
+	padding: 0;
+	overflow: hidden;
+}
+
+/* "Active" = section is still streaming. Subtle pulsing left border so the
+ * user knows work is happening without a separate spinner. */
+.kp-section.kp-section-active {
+	animation: kp-section-pulse 1.6s ease-in-out infinite;
+}
+@keyframes kp-section-pulse {
+	0%, 100% { border-left-color: #555; }
+	50%      { border-left-color: #888; }
+}
+
+.kp-section-summary {
+	cursor: pointer;
+	padding: 4px 8px;
+	font-family: "Segoe UI", -apple-system, sans-serif;
+	font-size: 12px;
+	color: #b0b0b0;
+	user-select: none;
+	list-style: none;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+.kp-section-summary::-webkit-details-marker { display: none; }
+.kp-section-summary::before {
+	content: "\25B6";
+	display: inline-block;
+	transform: rotate(0deg);
+	transition: transform 0.12s ease;
+	color: #666;
+	font-size: 9px;
+	width: 9px;
+}
+.kp-section[open] > .kp-section-summary::before {
+	transform: rotate(90deg);
+}
+.kp-section-summary:hover {
+	color: #d2d2d2;
+}
+
+/* Reasoning-specific colouring: matches the legacy block-reasoning purple. */
+.kp-section-reasoning > .kp-section-summary {
+	color: #9494d2;
+}
+.kp-section-reasoning > .kp-section-summary:hover {
+	color: #b8b8e8;
+}
+
+/* Tool-group-specific colouring: matches block-tool yellow. */
+.kp-section-tools > .kp-section-summary {
+	color: #cdb45a;
+	font-family: "Consolas", "Cascadia Mono", monospace;
+	font-size: 13px;
+}
+.kp-section-tools > .kp-section-summary:hover {
+	color: #e0c878;
+}
+
+/* Failure summary variant — applied via closeSection when the group
+ * contains at least one failed tool, so the user can see "something
+ * went wrong" without expanding. */
+.kp-section-summary.kp-summary-failure {
+	color: #d74b4b;
+}
+.kp-section-summary.kp-summary-failure:hover {
+	color: #ed6464;
+}
+
+/* Section body — content area inside <details>. Always rendered slightly
+ * dim and smaller than top-level content so the user instinctively reads
+ * the assistant's actual reply (top-level) first. */
+.kp-section-body {
+	padding: 6px 10px 8px 18px;
+	border-top: 1px solid #1a1a1a;
+	background: #060606;
+}
+
+/* Reasoning body: italicised, dim, smaller. Markdown rendered inline so
+ * code blocks and inline code keep their semantics. */
+.kp-section-reasoning .kp-section-body {
+	color: #9494d2;
+	font-size: 0.92em;
+	font-style: italic;
+	opacity: 0.85;
+	line-height: 1.45;
+}
+.kp-section-reasoning .kp-section-body p {
+	margin-bottom: 4px;
+}
+.kp-section-reasoning .kp-section-body code {
+	font-style: normal;
+}
+
+/* Tool body — a vertical list of compact tool lines. */
+.kp-section-tools .kp-section-body {
+	font-family: "Consolas", "Cascadia Mono", monospace;
+	font-size: 13px;
+	color: #cdb45a;
+	padding: 4px 10px 6px 18px;
+}
+
+.kp-tool-line {
+	display: block;
+	padding: 1px 0;
+	white-space: pre-wrap;
+	word-break: break-word;
+	color: #cdb45a;
+}
+.kp-tool-line .tool-success { color: #64be64; }
+.kp-tool-line .tool-failure { color: #d74b4b; }
+.kp-tool-line .tool-dim     { color: #a08c41; }
+
+/* When the whole line represents a failed tool, bold it inside the group
+ * so it's easy to spot when the user opens the (collapsed) section. */
+.kp-tool-line.kp-tool-line-failed {
+	color: #d74b4b;
+	font-weight: 600;
+}
+.kp-tool-line.kp-tool-line-failed .tool-success,
+.kp-tool-line.kp-tool-line-failed .tool-failure {
+	font-weight: 600;
+}
+
+/* ── Thinking indicator ───────────────────────────────────────────── */
+
+/*
+ * Shown for the dead air between user pressing Send and the very first
+ * event of the turn arriving back. Removed automatically on first event.
+ * No further spinners after that — live-streaming dimmed sections are the
+ * activity signal.
+ */
+.kp-thinking {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	margin: 8px 0;
+	padding: 6px 12px;
+	background: #0d0d0d;
+	border: 1px solid #252525;
+	border-radius: 12px;
+	color: #9494d2;
+	font-size: 12px;
+	font-style: italic;
+}
+.kp-thinking-dots {
+	display: inline-flex;
+	gap: 3px;
+}
+.kp-thinking-dots span {
+	width: 5px;
+	height: 5px;
+	border-radius: 50%;
+	background: #9494d2;
+	display: inline-block;
+	animation: kp-thinking-bounce 1.2s ease-in-out infinite;
+}
+.kp-thinking-dots span:nth-child(2) { animation-delay: 0.15s; }
+.kp-thinking-dots span:nth-child(3) { animation-delay: 0.30s; }
+@keyframes kp-thinking-bounce {
+	0%, 80%, 100% { opacity: 0.3; transform: translateY(0);   }
+	40%           { opacity: 1.0; transform: translateY(-3px); }
+}
