@@ -1,14 +1,15 @@
-<ctl:TurbolandDialog x:Class="TurboPilot.Dialogs.AboutDialog"
+<ctl:TurbolandFloatingDialog x:Class="TurboPilot.Dialogs.AboutDialog"
 					xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
 					xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
 					xmlns:ctl="clr-namespace:TurbolandTheme.Wpf.Controls;assembly=TurbolandTheme.Wpf"
 					Title="About TurboPilot">
 
 	<!-- The About box: a message over a single OK button. Everything inside the
-	     frame is a stock WPF control picking up an implicit style; the dialog
-	     contributes the chrome, the drag and shade behavior, and the soft
-	     modality. The dialog sizes to this content; nothing here sets a width
-	     or a height. -->
+	     frame is a stock WPF control picking up an implicit style; the floating
+	     dialog contributes the chrome, the drag behavior, the hard shadow, and
+	     true OS modality. Its own HWND keeps it above the WebView2 content and
+	     sorts correctly against other windows. The window sizes to this
+	     content; nothing here sets a width or a height. -->
 
 	<StackPanel>
 		<TextBlock x:Name="Message"/>
@@ -25,4 +26,4 @@
 					Margin="{DynamicResource Turboland.Size.ButtonStripMargin}"/>
 		</StackPanel>
 	</StackPanel>
-</ctl:TurbolandDialog>
+</ctl:TurbolandFloatingDialog>

@@ -3,7 +3,7 @@ using Theme = TurbolandTheme.Wpf.TurbolandTheme;
 
 namespace TurboPilot;
 
-public partial class App : Application
+public partial class App : System.Windows.Application
 {
 	protected override void OnStartup(StartupEventArgs e)
 	{

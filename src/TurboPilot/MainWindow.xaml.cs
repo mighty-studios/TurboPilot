@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Linq;
 using System.Text.Json;
 using System.Windows;
 using Microsoft.Web.WebView2.Wpf;
@@ -16,7 +15,6 @@ public partial class MainWindow : TurbolandWindow
 
 	// Attachments tracking
 	private readonly List<string> _attachments = new();
-	private AttachmentDialog? _currentAttachmentDialog;
 
 	public MainWindow()
 	{
@@ -64,25 +62,15 @@ public partial class MainWindow : TurbolandWindow
 	/// </summary>
 	private void ButtonAttachments_Click(object sender, RoutedEventArgs e)
 	{
-		_currentAttachmentDialog = new AttachmentDialog();
-		_currentAttachmentDialog.OnClose += OnAttachmentDialogClosed;
-		Dialogs.Show(_currentAttachmentDialog);
-	}
+		var dialog = new AttachmentDialog();
+		dialog.Initialize();
+		if (dialog.ShowDialog(this) != true) return;
 
-	/// <summary>
-	/// Called when the attachment dialog closes. Adds any new paths
-	/// to the attachment list and updates the button counter.
-	/// </summary>
-	private void OnAttachmentDialogClosed(bool accepted)
-	{
-		if (!accepted || _currentAttachmentDialog == null) return;
-
-		foreach (var path in _currentAttachmentDialog.AddedPaths)
+		foreach (var path in dialog.AddedPaths)
 		{
 			if (!_attachments.Contains(path))
 				_attachments.Add(path);
 		}
-		_currentAttachmentDialog = null;
 		UpdateAttachmentButton();
 	}
 
@@ -526,20 +514,13 @@ public partial class MainWindow : TurbolandWindow
 
 	private void OnAbout(object sender, RoutedEventArgs e)
 	{
-		// Opening the same dialog twice should raise the existing one rather
-		// than stack a duplicate on the host.
-		AboutDialog? existing = Dialogs.Dialogs.OfType<AboutDialog>().FirstOrDefault();
-		if (existing is not null)
-		{
-			Dialogs.BringToFront(existing);
-			existing.FocusFirstControl();
-			return;
-		}
-
-		Dialogs.Show(new AboutDialog
+		// Modal and owned: the OS keeps it above the main window (and its
+		// WebView2 airspace), and the blocking call means it cannot stack
+		// a duplicate.
+		new AboutDialog
 		{
 			WebsiteUrl = "https://github.com/mighty-studios/TurboPilot"
-		});
+		}.ShowDialog(this);
 	}
 
 	// ── History navigation stubs ─────────────────────────────────────────────
@@ -560,5 +541,21 @@ public partial class MainWindow : TurbolandWindow
 	private void ButtonHistoryNext_Click(object sender, RoutedEventArgs e)
 	{
 		// TODO: Navigate to the next (newer) prompt in history
+	}
+
+	// ── New Session ──────────────────────────────────────────────────────────
+
+	/// <summary>
+	/// Opens the New Session dialog to select a workspace folder.
+	/// </summary>
+	private void OnNewSession(object sender, RoutedEventArgs e)
+	{
+		var dialog = new Dialogs.ChooseFolderDialog();
+		if (dialog.ShowDialog(this) != true || string.IsNullOrEmpty(dialog.WorkspacePath))
+			return;
+
+		// TODO: Start the AI session with the selected workspace folder
+		// For now, just update the status bar
+		statusTextBlock.Text = $"Session started in: {dialog.WorkspacePath}";
 	}
 }

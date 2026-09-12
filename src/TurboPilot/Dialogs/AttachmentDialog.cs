@@ -13,33 +13,22 @@ namespace TurboPilot.Dialogs;
 /// <summary>
 /// Dialog for adding file or folder attachments to the prompt.
 /// Shows a ListBox of attached files/folders with add/remove support.
+/// Shown as a floating dialog window owned by the main window, so it sorts
+/// above the WebView2 content and against other windows by OS rule.
 /// </summary>
-internal sealed class AttachmentDialog : TurbolandDialog
+internal sealed class AttachmentDialog : TurbolandFloatingDialog
 {
 	private ListBox? _list;
 	private TextBox? _pathInput;
 	private Button? _removeBtn;
 	private readonly List<string> _addedPaths = new();
-	private bool _accepted;
 
 	/// <summary>The paths of all attached files/folders.</summary>
 	public IReadOnlyList<string> AddedPaths => _addedPaths;
 
-	/// <summary>
-	/// Callback invoked when the dialog closes. 
-	/// accepted=true means the user confirmed; false means cancelled.
-	/// </summary>
-	public Action<bool>? OnClose { get; set; }
-
 	public AttachmentDialog()
 	{
 		Title = "ATTACHMENTS";
-		Closed += OnBaseClosed;
-	}
-
-	private void OnBaseClosed(object? sender, EventArgs e)
-	{
-		OnClose?.Invoke(_accepted);
 	}
 
 	public void Initialize()
@@ -58,10 +47,10 @@ internal sealed class AttachmentDialog : TurbolandDialog
 		_list = new ListBox
 		{
 			Background = FindResource("Turboland.Brush.DesktopBackground") as Brush,
-			Foreground = FindResource("Turboland.Brush.TextPrimary") as Brush,
+			Foreground = FindResource("Turboland.Brush.WindowForeground") as Brush,
 			FontFamily = FindResource("Turboland.Font.Primary") as FontFamily,
 			FontSize = 14,
-			BorderBrush = FindResource("Turboland.Brush.ButtonBorder") as Brush,
+			BorderBrush = FindResource("Turboland.Brush.ControlShadow") as Brush,
 			HorizontalContentAlignment = HorizontalAlignment.Stretch,
 		};
 
@@ -83,10 +72,10 @@ internal sealed class AttachmentDialog : TurbolandDialog
 		_pathInput = new TextBox
 		{
 			Background = FindResource("Turboland.Brush.DesktopBackground") as Brush,
-			Foreground = FindResource("Turboland.Brush.TextPrimary") as Brush,
+			Foreground = FindResource("Turboland.Brush.WindowForeground") as Brush,
 			FontFamily = FindResource("Turboland.Font.Primary") as FontFamily,
 			FontSize = 14,
-			BorderBrush = FindResource("Turboland.Brush.ButtonBorder") as Brush,
+			BorderBrush = FindResource("Turboland.Brush.ControlShadow") as Brush,
 			HorizontalContentAlignment = HorizontalAlignment.Left,
 		};
 		_pathInput.KeyDown += (_, e) =>
@@ -101,11 +90,11 @@ internal sealed class AttachmentDialog : TurbolandDialog
 			Width = 80,
 			Height = 28,
 			Margin = new Thickness(8, 0, 12, 0),
-			Background = FindResource("Turboland.Brush.AccentBg") as Brush,
-			Foreground = FindResource("Turboland.Brush.AccentText") as Brush,
+			Background = FindResource("Turboland.Brush.ButtonFace") as Brush,
+			Foreground = FindResource("Turboland.Brush.ButtonForeground") as Brush,
 			FontFamily = FindResource("Turboland.Font.Primary") as FontFamily,
 			FontSize = 14,
-			BorderBrush = FindResource("Turboland.Brush.ButtonBorder") as Brush,
+			BorderBrush = FindResource("Turboland.Brush.ControlShadow") as Brush,
 		};
 		addBtn.Click += (_, _) => AddFromInput();
 
@@ -133,11 +122,11 @@ internal sealed class AttachmentDialog : TurbolandDialog
 			Width = 80,
 			Height = 28,
 			Margin = new Thickness(0, 0, 8, 0),
-			Background = FindResource("Turboland.Brush.ButtonBg") as Brush,
-			Foreground = FindResource("Turboland.Brush.TextPrimary") as Brush,
+			Background = FindResource("Turboland.Brush.ButtonFace") as Brush,
+			Foreground = FindResource("Turboland.Brush.WindowForeground") as Brush,
 			FontFamily = FindResource("Turboland.Font.Primary") as FontFamily,
 			FontSize = 14,
-			BorderBrush = FindResource("Turboland.Brush.ButtonBorder") as Brush,
+			BorderBrush = FindResource("Turboland.Brush.ControlShadow") as Brush,
 		};
 		cancelBtn.Click += (_, _) => Close(false);
 
@@ -147,11 +136,11 @@ internal sealed class AttachmentDialog : TurbolandDialog
 			Width = 100,
 			Height = 28,
 			Margin = new Thickness(0, 0, 8, 0),
-			Background = FindResource("Turboland.Brush.AccentBg") as Brush,
-			Foreground = FindResource("Turboland.Brush.AccentText") as Brush,
+			Background = FindResource("Turboland.Brush.ButtonFace") as Brush,
+			Foreground = FindResource("Turboland.Brush.ButtonForeground") as Brush,
 			FontFamily = FindResource("Turboland.Font.Primary") as FontFamily,
 			FontSize = 14,
-			BorderBrush = FindResource("Turboland.Brush.ButtonBorder") as Brush,
+			BorderBrush = FindResource("Turboland.Brush.ControlShadow") as Brush,
 		};
 		addAllBtn.Click += (_, _) => AcceptAll();
 
@@ -161,11 +150,11 @@ internal sealed class AttachmentDialog : TurbolandDialog
 			Width = 90,
 			Height = 28,
 			Margin = new Thickness(0, 0, 8, 0),
-			Background = FindResource("Turboland.Brush.ButtonBg") as Brush,
-			Foreground = FindResource("Turboland.Brush.TextPrimary") as Brush,
+			Background = FindResource("Turboland.Brush.ButtonFace") as Brush,
+			Foreground = FindResource("Turboland.Brush.WindowForeground") as Brush,
 			FontFamily = FindResource("Turboland.Font.Primary") as FontFamily,
 			FontSize = 14,
-			BorderBrush = FindResource("Turboland.Brush.ButtonBorder") as Brush,
+			BorderBrush = FindResource("Turboland.Brush.ControlShadow") as Brush,
 		};
 		_removeBtn.Click += (_, _) => RemoveSelected();
 
@@ -187,7 +176,7 @@ internal sealed class AttachmentDialog : TurbolandDialog
 
 		if (!File.Exists(path) && !Directory.Exists(path))
 		{
-			MessageBox.Show($"Path not found:\r\n{path}",
+			MessageBox.Show(this, $"Path not found:\r\n{path}",
 				"Attachment", MessageBoxButton.OK, MessageBoxImage.Warning);
 			return;
 		}
@@ -220,14 +209,12 @@ internal sealed class AttachmentDialog : TurbolandDialog
 			_addedPaths.Remove(selectedPath);
 			RefreshList();
 			UpdateButtonStates();
-			_accepted = true;
 			Close(true);
 		}
 	}
 
 	private void AcceptAll()
 	{
-		_accepted = true;
 		Close(true);
 	}
 

@@ -6,10 +6,10 @@ using TurbolandTheme.Wpf.Controls;
 namespace TurboPilot.Dialogs;
 
 /// <summary>
-/// The About box: a message over a Website and an OK button, shown on the
-/// main window's in-client dialog host.
+/// The About box: a message over a Website and an OK button, shown as a
+/// floating dialog window owned by the main window.
 /// </summary>
-public partial class AboutDialog : TurbolandDialog
+public partial class AboutDialog : TurbolandFloatingDialog
 {
 	public AboutDialog()
 	{
