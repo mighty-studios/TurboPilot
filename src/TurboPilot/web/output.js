@@ -1,10 +1,21 @@
-/* GoPilot Output — Rendering Engine
+/* TurboPilot Output - Rendering Engine
  *
- * Provides the C# <-> JS bridge for the Rendered output tab.
- * Called from MainForm.cs via WebView2.ExecuteScriptAsync().
+ * The Rendered tab mirrors the Raw tab verbatim: the host appends the
+ * same text to both, and this file renders it as a single markdown
+ * document (markdown, Mermaid diagrams, inline images). Nothing here
+ * is user-editable. Called from MainWindow.xaml.cs via
+ * WebView2.ExecuteScriptAsync().
  *
- * Public API (called from C#):
- *   appendBlock(id, kind, label, content)  - add a new block
+ * Transcript API (primary; keeps Rendered in sync with Raw):
+ *   setTranscript(text)                    - replace the whole transcript
+ *                                            and render it immediately
+ *   appendTranscript(text)                 - append text and re-render
+ *                                            (rapid appends are coalesced)
+ *   clearAll()                             - clear all output
+ *
+ * Block API (structured rendering, reserved for future use):
+ *   appendBlock(id, kind, label, content, isMarkdown)
+ *                                          - add a new block
  *   updateBlock(id, content)               - update an existing block's content (streaming)
  *   finalizeBlock(id)                      - mark a block as complete (triggers Mermaid)
  *   appendToolStatus(id, html)             - append status HTML to a tool/subagent block
@@ -25,7 +36,6 @@
  *                                            and clear the streaming pulse
  *   appendThinking(id)                     - emit the animated "Thinking..." pill
  *   removeThinking(id)                     - remove the thinking pill
- *   clearAll()                             - clear all output
  */
 
 (function () {
@@ -39,6 +49,13 @@
 	var mermaidLoaded = false;
 	var mermaidLoading = false;
 	var pendingMermaid = [];
+
+	// Transcript state: the full verbatim text mirrored from the Raw tab.
+	var transcriptText = "";
+	var transcriptRenderTimer = 0;
+	var transcriptDiagramTimer = 0;
+	var TRANSCRIPT_RENDER_MS = 40;   // coalesce rapid appends while streaming
+	var TRANSCRIPT_DIAGRAM_MS = 300; // convert diagrams once the stream pauses
 
 	// Debounce timer for streaming renders
 	var renderTimers = {};
@@ -452,6 +469,53 @@
 
 	// ── Public API ─────────────────────────────────────────────────
 
+	// ── Transcript API ─────────────────────────────────────────────
+	//
+	// The host treats the Raw tab as the source of truth and mirrors
+	// every append/clear here so both tabs always show the same text,
+	// this one rendered for human viewing.
+
+	function renderTranscript(withDiagrams) {
+		outputEl.innerHTML = renderMarkdown(transcriptText);
+		if (withDiagrams) {
+			processMermaidBlocks(outputEl);
+			processOversizedBlocks(outputEl);
+		}
+		scrollToBottom();
+	}
+
+	/**
+	 * Replace the entire transcript and render it immediately.
+	 * Used for the full re-sync once the page has (re)loaded.
+	 */
+	window.setTranscript = function (text) {
+		if (transcriptRenderTimer) { clearTimeout(transcriptRenderTimer); transcriptRenderTimer = 0; }
+		if (transcriptDiagramTimer) { clearTimeout(transcriptDiagramTimer); transcriptDiagramTimer = 0; }
+		transcriptText = text || "";
+		renderTranscript(true);
+	};
+
+	/**
+	 * Append text to the transcript. Rapid appends (streaming tokens)
+	 * are coalesced: markdown re-renders within ~40ms of the first
+	 * delta, and the Mermaid/table pass runs once the stream pauses.
+	 */
+	window.appendTranscript = function (text) {
+		if (!text) return;
+		transcriptText += text;
+		if (!transcriptRenderTimer) {
+			transcriptRenderTimer = setTimeout(function () {
+				transcriptRenderTimer = 0;
+				renderTranscript(false);
+			}, TRANSCRIPT_RENDER_MS);
+		}
+		if (transcriptDiagramTimer) clearTimeout(transcriptDiagramTimer);
+		transcriptDiagramTimer = setTimeout(function () {
+			transcriptDiagramTimer = 0;
+			renderTranscript(true);
+		}, TRANSCRIPT_DIAGRAM_MS);
+	};
+
 	/**
 	 * Append one or more inline images to an existing block (used for the
 	 * user echo of pasted clipboard images, so the user sees a thumbnail
@@ -614,6 +678,9 @@
 			clearTimeout(renderTimers[key]);
 		}
 		renderTimers = {};
+		transcriptText = "";
+		if (transcriptRenderTimer) { clearTimeout(transcriptRenderTimer); transcriptRenderTimer = 0; }
+		if (transcriptDiagramTimer) { clearTimeout(transcriptDiagramTimer); transcriptDiagramTimer = 0; }
 		// Reset sticky-scroll: an empty document is trivially "at bottom"
 		// and the user expects new output to follow.
 		stickToBottom = true;

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using System.Windows;
 using Microsoft.Web.WebView2.Wpf;
@@ -13,6 +14,12 @@ public partial class MainWindow : TurbolandWindow
 	private string? _outputHtmlUri;
 	private bool _webViewReady = false;
 
+	// The verbatim transcript shown in the Raw tab. It is the source of
+	// truth for both output views: the Rendered WebView2 always mirrors
+	// this buffer, so a full re-sync is possible at any time (e.g. after
+	// the page (re)loads).
+	private readonly StringBuilder _outputText = new();
+
 	// Attachments tracking
 	private readonly List<string> _attachments = new();
 
@@ -20,11 +27,12 @@ public partial class MainWindow : TurbolandWindow
 	{
 		InitializeComponent();
 
-		// Set default text for Raw tab
-		richTextBoxOutput.AppendText("Welcome to TurboPilot!\r\n");
-		richTextBoxOutput.AppendText("This is the Raw output tab with retro styling.\r\n");
-		richTextBoxOutput.AppendText("Blue background with yellow text.\r\n");
-		richTextBoxOutput.AppendText("Support for white, red, green, and black text.\r\n");
+		// Seed the transcript through the shared API so Raw and Rendered
+		// start in sync.
+		AppendOutput("Welcome to TurboPilot!\r\n");
+		AppendOutput("This is the Raw output tab with retro styling.\r\n");
+		AppendOutput("Blue background with yellow text.\r\n");
+		AppendOutput("Support for white, red, green, and black text.\r\n");
 
 		// Initialize WebView2 asynchronously
 		_ = InitializeWebViewAsync();
@@ -128,7 +136,8 @@ public partial class MainWindow : TurbolandWindow
 			{
 				_outputHtmlUri = new Uri(htmlPath).AbsoluteUri;
 				webViewOutput.CoreWebView2.Navigate(_outputHtmlUri);
-				_webViewReady = true;
+				// _webViewReady is set in NavigationCompleted, once
+				// output.js is actually loaded and its functions exist.
 			}
 			else
 			{
@@ -196,7 +205,8 @@ public partial class MainWindow : TurbolandWindow
 	{
 		switch (type)
 		{
-			case "file-link-click":
+			// Message names match the renderer's postPathMessage() calls.
+			case "openPath":
 				// Try to open the file in the default editor
 				try
 				{
@@ -213,7 +223,7 @@ public partial class MainWindow : TurbolandWindow
 				}
 				break;
 
-			case "file-link-reveal":
+			case "revealPath":
 				// Reveal file in Explorer
 				try
 				{
@@ -277,23 +287,29 @@ public partial class MainWindow : TurbolandWindow
 	}
 
 	/// <summary>
-	/// Safety net: if a navigation completes and we are NOT on our
-	/// expected output.html page, re-navigate to output.html.
+	/// Marks the renderer live once output.html has loaded and replays the
+	/// transcript buffer so the Rendered tab matches the Raw tab. If a
+	/// navigation completes on an unexpected page, re-navigates to
+	/// output.html (the sync below then runs again on the next completion).
 	/// </summary>
 	private void WebView_NavigationCompleted(
 		object? sender,
 		Microsoft.Web.WebView2.Core.CoreWebView2NavigationCompletedEventArgs e)
 	{
-		if (_outputHtmlUri == null || !_webViewReady) return;
+		if (_outputHtmlUri == null) return;
 
 		var currentUri = webViewOutput.CoreWebView2.Source;
 		if (currentUri != null
 			&& currentUri.Equals(_outputHtmlUri, StringComparison.OrdinalIgnoreCase))
 		{
+			// output.js is loaded and its functions exist from here on.
+			_webViewReady = true;
+			SyncRenderedTranscript();
 			return;
 		}
 
 		// We are on an unexpected page -- recover by re-navigating
+		_webViewReady = false;
 		webViewOutput.CoreWebView2.Navigate(_outputHtmlUri);
 	}
 
@@ -341,166 +357,74 @@ public partial class MainWindow : TurbolandWindow
 		}
 	}
 
-	// ── WebView2 JS bridge helpers ───────────────────────────────────────────
+	// ── Output API ───────────────────────────────────────────────────────────
+	//
+	// The Raw tab is the source of truth. AppendOutput and ClearOutput
+	// write the verbatim text there and mirror the same content into the
+	// Rendered WebView2, which displays it as rendered markdown with
+	// Mermaid diagrams and inline images. Both views are read-only; all
+	// writes go through this API.
 
 	/// <summary>
-	/// Appends a markdown block to the WebView2 Rendered tab.
+	/// The full verbatim transcript currently displayed in the Raw tab.
 	/// </summary>
-	public void AppendMarkdown(string id, string content)
+	public string OutputText => _outputText.ToString();
+
+	/// <summary>
+	/// Appends text verbatim to the Raw tab and immediately syncs the
+	/// Rendered tab to the same content. Safe to call from any thread;
+	/// appends are applied in order on the UI thread.
+	/// </summary>
+	public void AppendOutput(string text)
 	{
-		if (!_webViewReady) return;
-		var js = $"appendBlock({JsString(id)}, \"assistant\", \"\", {JsString(content)})";
-		_ = webViewOutput.CoreWebView2.ExecuteScriptAsync(js);
+		if (string.IsNullOrEmpty(text)) return;
+		if (!Dispatcher.CheckAccess())
+		{
+			Dispatcher.BeginInvoke(new Action<string>(AppendOutput), text);
+			return;
+		}
+
+		_outputText.Append(text);
+		richTextBoxOutput.AppendText(text);
+		PushToRenderer($"appendTranscript({JsString(text)})");
 	}
 
 	/// <summary>
-	/// Finalizes a streaming block in the WebView2.
-	/// </summary>
-	public void FinalizeBlock(string id)
-	{
-		if (!_webViewReady) return;
-		var js = $"finalizeBlock({JsString(id)})";
-		_ = webViewOutput.CoreWebView2.ExecuteScriptAsync(js);
-	}
-
-	/// <summary>
-	/// Clears all output in the WebView2.
+	/// Clears the transcript from both the Raw tab and the Rendered tab.
+	/// Safe to call from any thread.
 	/// </summary>
 	public void ClearOutput()
 	{
-		if (!_webViewReady) return;
-		_ = webViewOutput.CoreWebView2.ExecuteScriptAsync("clearAll()");
+		if (!Dispatcher.CheckAccess())
+		{
+			Dispatcher.BeginInvoke(new Action(ClearOutput));
+			return;
+		}
+
+		_outputText.Clear();
+		richTextBoxOutput.Document.Blocks.Clear();
+		PushToRenderer("clearAll()");
 	}
 
 	/// <summary>
-	/// Appends a user prompt block to the WebView2.
+	/// Executes renderer script once the page is loaded. Content written
+	/// before the page is ready is not lost: the full transcript is
+	/// replayed via SyncRenderedTranscript when navigation completes.
 	/// </summary>
-	public void AppendUserPrompt(string id, string content)
+	private void PushToRenderer(string js)
 	{
 		if (!_webViewReady) return;
-		var js = $"appendBlock({JsString(id)}, \"user\", \"\", {JsString(content)})";
 		_ = webViewOutput.CoreWebView2.ExecuteScriptAsync(js);
 	}
 
 	/// <summary>
-	/// Appends a status/meta message to the WebView2.
+	/// Replaces the Rendered tab content with the full transcript buffer
+	/// so it matches the Raw tab exactly.
 	/// </summary>
-	public void AppendStatus(string id, string content)
+	private void SyncRenderedTranscript()
 	{
 		if (!_webViewReady) return;
-		var js = $"appendBlock({JsString(id)}, \"status\", \"\", {JsString(content)})";
-		_ = webViewOutput.CoreWebView2.ExecuteScriptAsync(js);
-	}
-
-	/// <summary>
-	/// Appends a tool activity block to the WebView2.
-	/// </summary>
-	public void AppendToolActivity(string id, string content)
-	{
-		if (!_webViewReady) return;
-		var js = $"appendBlock({JsString(id)}, \"tool\", \"\", {JsString(content)})";
-		_ = webViewOutput.CoreWebView2.ExecuteScriptAsync(js);
-	}
-
-	/// <summary>
-	/// Appends a reasoning block to the WebView2.
-	/// </summary>
-	public void AppendReasoning(string id, string content)
-	{
-		if (!_webViewReady) return;
-		var js = $"appendBlock({JsString(id)}, \"reasoning\", \"\", {JsString(content)})";
-		_ = webViewOutput.CoreWebView2.ExecuteScriptAsync(js);
-	}
-
-	/// <summary>
-	/// Appends an error block to the WebView2.
-	/// </summary>
-	public void AppendError(string id, string content)
-	{
-		if (!_webViewReady) return;
-		var js = $"appendBlock({JsString(id)}, \"error\", \"\", {JsString(content)})";
-		_ = webViewOutput.CoreWebView2.ExecuteScriptAsync(js);
-	}
-
-	/// <summary>
-	/// Appends a thinking indicator to the WebView2.
-	/// </summary>
-	public void AppendThinking(string id)
-	{
-		if (!_webViewReady) return;
-		var js = $"appendThinking({JsString(id)})";
-		_ = webViewOutput.CoreWebView2.ExecuteScriptAsync(js);
-	}
-
-	/// <summary>
-	/// Removes a thinking indicator from the WebView2.
-	/// </summary>
-	public void RemoveThinking(string id)
-	{
-		if (!_webViewReady) return;
-		var js = $"removeThinking({JsString(id)})";
-		_ = webViewOutput.CoreWebView2.ExecuteScriptAsync(js);
-	}
-
-	/// <summary>
-	/// Appends a collapsible section (reasoning or tools) to the WebView2.
-	/// </summary>
-	public void AppendSection(string id, string sectionKind, string summaryText, bool defaultOpen)
-	{
-		if (!_webViewReady) return;
-		var collapse = !defaultOpen;
-		var js = $"appendSection({JsString(id)}, {JsString(sectionKind)}, {JsString(summaryText)}, {collapse})";
-		_ = webViewOutput.CoreWebView2.ExecuteScriptAsync(js);
-	}
-
-	/// <summary>
-	/// Updates the content of a section in the WebView2.
-	/// </summary>
-	public void SetSectionContent(string sectionId, string content, bool isMarkdown)
-	{
-		if (!_webViewReady) return;
-		var js = $"setSectionContent({JsString(sectionId)}, {JsString(content)}, {isMarkdown})";
-		_ = webViewOutput.CoreWebView2.ExecuteScriptAsync(js);
-	}
-
-	/// <summary>
-	/// Closes a section in the WebView2.
-	/// </summary>
-	public void CloseSection(string id, string summaryText, bool collapse, bool hasFailure)
-	{
-		if (!_webViewReady) return;
-		var js = $"closeSection({JsString(id)}, {JsString(summaryText)}, {collapse}, {hasFailure})";
-		_ = webViewOutput.CoreWebView2.ExecuteScriptAsync(js);
-	}
-
-	/// <summary>
-	/// Appends a tool line inside a tool group section.
-	/// </summary>
-	public void AppendSectionLine(string sectionId, string lineId, string html)
-	{
-		if (!_webViewReady) return;
-		var js = $"appendSectionLine({JsString(sectionId)}, {JsString(lineId)}, {JsString(html)})";
-		_ = webViewOutput.CoreWebView2.ExecuteScriptAsync(js);
-	}
-
-	/// <summary>
-	/// Updates an existing tool line's innerHTML.
-	/// </summary>
-	public void UpdateSectionLine(string lineId, string html)
-	{
-		if (!_webViewReady) return;
-		var js = $"updateSectionLine({JsString(lineId)}, {JsString(html)})";
-		_ = webViewOutput.CoreWebView2.ExecuteScriptAsync(js);
-	}
-
-	/// <summary>
-	/// Marks a tool line as failed.
-	/// </summary>
-	public void MarkSectionLineFailed(string lineId)
-	{
-		if (!_webViewReady) return;
-		var js = $"markSectionLineFailed({JsString(lineId)})";
-		_ = webViewOutput.CoreWebView2.ExecuteScriptAsync(js);
+		_ = webViewOutput.CoreWebView2.ExecuteScriptAsync($"setTranscript({JsString(_outputText.ToString())})");
 	}
 
 	/// <summary>
