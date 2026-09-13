@@ -1,0 +1,542 @@
+using System.Globalization;
+using System.Text;
+using System.Text.Json;
+using System.Windows.Media;
+
+namespace TurboPilot;
+
+/// <summary>
+/// Borland Vision (Turbo Vision) theme for the output views.
+///
+/// This file is the single source of truth for the colors and font
+/// parameters used by the Rendered (WebView2) tab and the Raw tab.
+///
+/// HOW TO RESTYLE
+///   1. Change a hue once in <see cref="Palette"/> (the fixed VGA 16 set)
+///      or in <see cref="Semantic"/> (names that describe a use rather
+///      than a hue).
+///   2. Change what an element looks like in <see cref="Roles"/>: one row
+///      per element, with ink, face, size, weight, slant and decoration.
+///   3. Change code coloring in <see cref="SyntaxRoles"/>.
+///   4. Diagrams pick their colors up from <see cref="MermaidTheme"/>.
+///
+/// The tables compile into one stylesheet at startup, injected into the
+/// WebView2 before the page paints. The Raw tab reads the same palette for
+/// its face, ink and selection.
+/// </summary>
+public static class BorlandVisionTheme
+{
+	/// <summary>Face name of the bundled DOS bitmap font.</summary>
+	public const string FontFaceName = "Px437 IBM VGA 9x16";
+
+	/// <summary>Font file, relative to web/output.html.</summary>
+	public const string FontFileUrl = "fonts/Px437_IBM_VGA_9x16.ttf";
+
+	/// <summary>
+	/// CSS fallback chain. Segoe UI Emoji supplies the glyphs code page 437
+	/// never had, so emoji still render in color.
+	/// </summary>
+	public const string FontStack =
+		"'Px437 IBM VGA 9x16', 'Consolas', 'Segoe UI Emoji', 'Courier New', monospace";
+
+	/// <summary>Base body size in CSS pixels. 16 puts the face on its native 9x16 cell.</summary>
+	public const double BaseFontSizePx = 16;
+
+	/// <summary>Leading for prose. 1.0 is the raw text-mode cell; 1.25 reads better in long output.</summary>
+	public const double LineHeight = 1.25;
+
+	/// <summary>Font size of the Raw tab, which mirrors the Rendered base size.</summary>
+	public const double RawFontSize = 16;
+
+	/// <summary>
+	/// The hardware VGA 16 palette. These are fixed values, not taste:
+	/// every other color in the app resolves to one of them.
+	/// </summary>
+	public static class Palette
+	{
+		public const string Black = "#000000";        // 0
+		public const string Blue = "#0000AA";         // 1
+		public const string Green = "#00AA00";        // 2
+		public const string Cyan = "#00AAAA";         // 3
+		public const string Red = "#AA0000";          // 4
+		public const string Magenta = "#AA00AA";      // 5
+		public const string Brown = "#AA5500";        // 6
+		public const string LightGray = "#AAAAAA";    // 7
+		public const string DarkGray = "#555555";     // 8
+		public const string LightBlue = "#5555FF";    // 9
+		public const string LightGreen = "#55FF55";   // 10
+		public const string LightCyan = "#55FFFF";    // 11
+		public const string LightRed = "#FF5555";     // 12
+		public const string Pink = "#FF55FF";         // 13
+		public const string Yellow = "#FFFF55";       // 14
+		public const string White = "#FFFFFF";        // 15
+
+		/// <summary>
+		/// The one non-hardware entry: a shaded desktop blue used for zebra
+		/// stripes and diagram clusters, where plain blue cannot separate two
+		/// adjacent faces.
+		/// </summary>
+		public const string DeepBlue = "#000055";
+	}
+
+	/// <summary>
+	/// Named uses. The tables below refer to these rather than to a hue, so
+	/// a whole surface can be retuned without editing a rule.
+	/// </summary>
+	public static class Semantic
+	{
+		/// <summary>The editor desktop: a blue field carrying light gray ink.</summary>
+		public const string DesktopBackground = Palette.Blue;
+		public const string DesktopForeground = Palette.LightGray;
+
+		/// <summary>
+		/// The Raw tab. It shows the transcript source, so it is drawn the way
+		/// the IDE drew a source window: yellow on blue. It deliberately does
+		/// not match the Rendered body ink, which is gray, so the two tabs are
+		/// never mistaken for one another.
+		/// </summary>
+		public const string RawBackground = Palette.Blue;
+		public const string RawForeground = Palette.Yellow;
+
+		/// <summary>Recessed panels: code, diagrams, tool output.</summary>
+		public const string PanelBackground = Palette.Black;
+		public const string PanelBorder = Palette.DarkGray;
+		public const string PanelBorderStrong = Palette.LightGray;
+
+		/// <summary>Reverse video: the one selection treatment in the app.</summary>
+		public const string SelectionBackground = Palette.LightGray;
+		public const string SelectionForeground = Palette.Black;
+
+		/// <summary>State colors.</summary>
+		public const string Accent = Palette.Yellow;
+		public const string Success = Palette.LightGreen;
+		public const string Failure = Palette.LightRed;
+		public const string Warning = Palette.Pink;
+		public const string Info = Palette.LightCyan;
+		public const string Dim = Palette.Brown;
+	}
+
+	/// <summary>
+	/// One row of the styling table.
+	/// </summary>
+	/// <param name="Selector">CSS selector. Rendered content always lives under #output.</param>
+	/// <param name="Label">What the row is for, for whoever edits it next.</param>
+	/// <param name="Foreground">Hex ink, or empty to inherit.</param>
+	/// <param name="Background">Hex face, or empty to stay transparent.</param>
+	/// <param name="SizeEm">Size relative to the base face; 1.0 leaves it alone.</param>
+	/// <param name="Bold">Bold weight.</param>
+	/// <param name="Italic">Slanted.</param>
+	/// <param name="Decoration">A text-decoration value, or empty for none.</param>
+	public sealed record Role(
+		string Selector,
+		string Label,
+		string Foreground = "",
+		string Background = "",
+		double SizeEm = 1.0,
+		bool Bold = false,
+		bool Italic = false,
+		string Decoration = "");
+
+	/// <summary>
+	/// The markdown element table. Edit a row to restyle that element.
+	///
+	/// Headings step down the classic intensity ladder (yellow, white,
+	/// cyan, green, pink, gray). Emphasis is pink, strong is white, links
+	/// are light cyan and flip to reverse video under the pointer. Code
+	/// drops into a black well, which is how the Turbo editor drew a
+	/// nested window on the blue desktop.
+	/// </summary>
+	public static readonly Role[] Roles =
+	{
+		new("html, body", "Body copy on the desktop",
+			Semantic.DesktopForeground, Semantic.DesktopBackground),
+
+		// Headings
+		new("#output h1", "Heading 1: the title of a response",
+			Palette.Yellow, "", 1.5, Bold: true),
+		new("#output h2", "Heading 2",
+			Palette.White, "", 1.3, Bold: true),
+		new("#output h3", "Heading 3",
+			Palette.LightCyan, "", 1.15, Bold: true),
+		new("#output h4", "Heading 4",
+			Palette.LightGreen, "", 1.05, Bold: true),
+		new("#output h5", "Heading 5",
+			Palette.Pink, "", 1.0, Bold: true),
+		new("#output h6", "Heading 6: the quietest rung, still legible on blue",
+			Palette.LightGray, "", 1.0, Bold: true),
+
+		// Emphasis
+		new("#output strong", "Bold",
+			Palette.White, "", 1.0, Bold: true),
+		new("#output em", "Italic: pink is the emphasis color of the help screens",
+			Palette.Pink, "", 1.0, Italic: true),
+		new("#output del", "Struck through",
+			Palette.LightRed, "", 1.0, Decoration: "line-through"),
+		new("#output mark", "Marked text: reverse video, no new hue needed",
+			Semantic.SelectionForeground, Semantic.Accent),
+
+		// Links
+		new("#output a", "Hyperlink",
+			Palette.LightCyan, "", 1.0, Decoration: "underline"),
+		// Visited must precede hover, or it wins the tie and a hovered link
+		// never lights up.
+		new("#output a:visited", "Already opened: dimmed rather than purple",
+			Palette.LightGray),
+		new("#output a:hover", "Hyperlink under the pointer: full reverse video",
+			Palette.Blue, Palette.Yellow, 1.0, Decoration: "underline"),
+		new("#output a[href^=\"kp-path:\" i], #output a[href^=\"kp-path%3A\" i]",
+			"File-path link: green, the way the editor drew a filename",
+			Palette.LightGreen, "", 1.0, Decoration: "underline"),
+
+		// Code. The inline rule deliberately excludes code inside a block so
+		// the highlighter keeps control there.
+		new("#output :not(pre) > code", "Inline code: yellow ink in a black well",
+			Palette.Yellow, Semantic.PanelBackground),
+		new("#output pre", "Fenced block: a black editor window on the blue desktop",
+			Palette.LightGray, Semantic.PanelBackground),
+		new("#output kbd", "Keycap",
+			Palette.White, Palette.DarkGray),
+
+		// Quotations
+		new("#output blockquote", "Quote: green, the color of the help text",
+			Palette.LightGreen, "", 1.0, Italic: true),
+
+		// Lists
+		new("#output li", "List item",
+			Semantic.DesktopForeground),
+		new("#output li::marker", "Bullet and counter: yellow markers on the blue field",
+			Palette.Yellow),
+
+		// Tables
+		new("#output th", "Table header: reversed light gray face",
+			Semantic.SelectionForeground, Semantic.SelectionBackground, 1.0, Bold: true),
+		new("#output td", "Table cell",
+			Semantic.DesktopForeground),
+		new("#output tbody tr:nth-child(even) td", "Zebra stripe",
+			"", Palette.DeepBlue),
+
+		// Media
+		new("#output img", "Inline image sits in a black well",
+			"", Semantic.PanelBackground),
+		new("#output .mermaid-container", "Rendered diagram well",
+			Semantic.DesktopForeground, Semantic.PanelBackground),
+
+		// Transcript block kinds
+		new(".block-user .block-label", "User prompt label",
+			Palette.Yellow),
+		new(".block-user .block-content", "User prompt text",
+			Palette.White),
+		new(".block-assistant .block-label", "Assistant label",
+			Palette.LightGreen),
+		new(".block-assistant .block-content", "Assistant text",
+			Semantic.DesktopForeground),
+		new(".block-reasoning .block-label, .block-reasoning .block-content",
+			"Reasoning: dim and slanted, because it is not the answer",
+			Palette.Pink, "", 1.0, Italic: true),
+		new(".block-tool", "Tool activity",
+			Palette.Yellow, Semantic.PanelBackground),
+		new(".block-subagent", "Sub-agent activity",
+			Palette.LightCyan, Semantic.PanelBackground),
+		new(".tool-success, .subagent-complete", "Step succeeded",
+			Palette.LightGreen),
+		new(".tool-failure, .subagent-failed", "Step failed",
+			Palette.LightRed),
+		new(".tool-dim", "Secondary detail inside a tool line",
+			Palette.Brown),
+		new(".block-error", "Error",
+			Palette.LightRed),
+		new(".block-status", "Status and meta",
+			Semantic.DesktopForeground, "", 1.0, Italic: true),
+
+		// Collapsible sections
+		new(".kp-section", "Section shell",
+			Semantic.DesktopForeground, Palette.DeepBlue),
+		new(".kp-section-summary", "Section summary",
+			Palette.LightGray),
+		new(".kp-section-reasoning > .kp-section-summary", "Reasoning summary",
+			Palette.Pink),
+		new(".kp-section-tools > .kp-section-summary", "Tool group summary",
+			Palette.Yellow),
+		new(".kp-section-summary.kp-summary-failure", "Summary of a group that failed",
+			Palette.LightRed),
+		new(".kp-section-body", "Section body",
+			Semantic.DesktopForeground, Semantic.PanelBackground),
+
+		// Chrome
+		new(".kp-zoom-toolbar", "Diagram zoom toolbar",
+			"", Semantic.PanelBackground),
+		new(".kp-zb", "Zoom button",
+			Palette.LightGray, Semantic.PanelBackground),
+		new(".kp-zb:hover", "Zoom button under the pointer",
+			Palette.Blue, Palette.Yellow),
+		new(".kp-thinking", "Waiting-for-first-token pill",
+			Palette.Pink, Semantic.PanelBackground),
+
+		// Selection
+		new("::selection", "Selected text: reverse video",
+			Semantic.SelectionForeground, Semantic.SelectionBackground),
+	};
+
+	/// <summary>
+	/// highlight.js token table: the classic Turbo C and Pascal editor
+	/// scheme mapped onto the token classes the bundler emits.
+	/// </summary>
+	public static readonly Role[] SyntaxRoles =
+	{
+		new(".hljs", "Code face", Palette.LightGray, Semantic.PanelBackground),
+		new(".hljs-keyword, .hljs-built_in, .hljs-literal, .hljs-type",
+			"Keywords: white and bold, as the Turbo editor drew them",
+			Palette.White, "", 1.0, Bold: true),
+		new(".hljs-string, .hljs-regexp, .hljs-addition",
+			"Strings", Palette.LightGreen),
+		new(".hljs-number, .hljs-symbol, .hljs-bullet",
+			"Numbers and bullets", Palette.Pink),
+		new(".hljs-comment, .hljs-quote, .hljs-meta",
+			"Comments", Palette.Green, "", 1.0, Italic: true),
+		new(".hljs-title, .hljs-title.function_, .hljs-title.class_",
+			"Function and class names", Palette.Yellow),
+		new(".hljs-attr, .hljs-attribute, .hljs-property",
+			"Attributes", Palette.LightCyan),
+		new(".hljs-variable, .hljs-template-variable, .hljs-selector-tag",
+			"Variables and selectors", Palette.LightCyan),
+		new(".hljs-name, .hljs-tag, .hljs-selector-id, .hljs-selector-class",
+			"Markup names", Palette.LightGreen),
+		new(".hljs-deletion", "Removed line", Palette.LightRed),
+		new(".hljs-emphasis", "Emphasis inside code", "", "", 1.0, Italic: true),
+		new(".hljs-strong", "Strong inside code", "", "", 1.0, Bold: true),
+	};
+
+	/// <summary>
+	/// Mermaid variables, built from the same palette so a diagram cannot
+	/// drift from the text around it. The renderer reads this off
+	/// window.BV_THEME when it initializes Mermaid.
+	/// </summary>
+	public static IReadOnlyDictionary<string, string> MermaidTheme { get; } =
+		new Dictionary<string, string>
+		{
+			["theme"] = "base",
+			["background"] = Semantic.PanelBackground,
+			["fontFamily"] = FontStack,
+			["fontSize"] = "14px",
+			["primaryColor"] = Palette.Blue,
+			["primaryTextColor"] = Palette.White,
+			["primaryBorderColor"] = Palette.LightGray,
+			["secondaryColor"] = Palette.Cyan,
+			["secondaryTextColor"] = Palette.Black,
+			["secondaryBorderColor"] = Palette.LightGray,
+			["tertiaryColor"] = Palette.Magenta,
+			["tertiaryTextColor"] = Palette.White,
+			["tertiaryBorderColor"] = Palette.LightGray,
+			["lineColor"] = Palette.LightCyan,
+			["textColor"] = Palette.LightGray,
+			["mainBkg"] = Palette.Blue,
+			["nodeBorder"] = Palette.LightGray,
+			["nodeTextColor"] = Palette.White,
+			["clusterBkg"] = Palette.DeepBlue,
+			["clusterBorder"] = Palette.DarkGray,
+			["edgeLabelBackground"] = Semantic.PanelBackground,
+			["titleColor"] = Palette.Yellow,
+			["errorColor"] = Palette.LightRed,
+
+			// Sequence diagrams
+			["actorBkg"] = Palette.Blue,
+			["actorTextColor"] = Palette.White,
+			["actorBorder"] = Palette.LightGray,
+			["actorLineColor"] = Palette.DarkGray,
+			["signalColor"] = Palette.LightGray,
+			["signalTextColor"] = Palette.Yellow,
+			["labelBoxBkgColor"] = Semantic.PanelBackground,
+			["labelBoxBorderColor"] = Palette.DarkGray,
+			["labelTextColor"] = Palette.LightCyan,
+			["loopTextColor"] = Palette.Pink,
+			["noteBkgColor"] = Palette.Yellow,
+			["noteTextColor"] = Palette.Black,
+			["noteBorderColor"] = Palette.Yellow,
+			["activationBkgColor"] = Palette.Cyan,
+			["activationBorderColor"] = Palette.LightCyan,
+
+			// State diagrams
+			["labelColor"] = Palette.White,
+			["compositTitleColor"] = Palette.Yellow,
+			["dividerColor"] = Palette.DarkGray,
+
+			// Gantt
+			["sectionBkgColor"] = Palette.DeepBlue,
+			["altSectionBkgColor"] = Semantic.PanelBackground,
+			["taskBkgColor"] = Palette.Cyan,
+			["taskTextColor"] = Palette.Black,
+			["taskTextLightColor"] = Palette.Black,
+			["taskTextOutsideColor"] = Palette.LightGray,
+			["taskBorderColor"] = Palette.LightGray,
+			["activeTaskBkgColor"] = Palette.DarkGray,
+			["doneTaskBkgColor"] = Palette.Brown,
+			["critBkgColor"] = Palette.Red,
+			["gridColor"] = Palette.DarkGray,
+			["todayLineColor"] = Palette.LightRed,
+
+			// Pie
+			["pie1"] = Palette.Yellow,
+			["pie2"] = Palette.LightCyan,
+			["pie3"] = Palette.LightGreen,
+			["pie4"] = Palette.Pink,
+			["pie5"] = Palette.Cyan,
+			["pie6"] = Palette.LightRed,
+			["pie7"] = Palette.LightGray,
+			["pieOuterStrokeColor"] = Palette.LightGray,
+			["pieStrokeColor"] = Palette.Black,
+			["pieTitleTextSize"] = "16px",
+			["pieSectionTextSize"] = "14px",
+		};
+
+	/// <summary>
+	/// The complete stylesheet: font face, palette variables, the role
+	/// table and the syntax table.
+	/// </summary>
+	public static string BuildCss()
+	{
+		var sb = new StringBuilder();
+
+		sb.Append("@font-face{font-family:'").Append(FontFaceName)
+			.Append("';src:url('").Append(FontFileUrl)
+			.Append("') format('truetype');font-display:swap;}\n");
+
+		sb.Append(":root{\n");
+		foreach (var (name, hex) in PaletteVariables())
+		{
+			sb.Append("  --bv-").Append(name).Append(':').Append(hex).Append(";\n");
+		}
+		sb.Append("  --bv-font:").Append(FontStack).Append(";\n");
+		sb.Append("  --bv-base-size:").Append(Format(BaseFontSizePx)).Append("px;\n");
+		sb.Append("  --bv-line-height:").Append(Format(LineHeight)).Append(";\n");
+		sb.Append("}\n");
+
+		sb.Append("html,body{font-family:var(--bv-font);")
+			.Append("font-size:var(--bv-base-size);line-height:var(--bv-line-height);}\n");
+
+		foreach (var role in Roles)
+		{
+			AppendRule(sb, role);
+		}
+		foreach (var role in SyntaxRoles)
+		{
+			AppendRule(sb, role);
+		}
+
+		return sb.ToString();
+	}
+
+	/// <summary>
+	/// Script that runs before the page's own scripts on every document
+	/// creation. It publishes the diagram palette and installs the
+	/// stylesheet, so the first paint is already themed.
+	/// </summary>
+	public static string BuildBootstrapScript()
+	{
+		var css = JsonSerializer.Serialize(BuildCss());
+		var theme = JsonSerializer.Serialize(MermaidTheme);
+
+		var sb = new StringBuilder();
+		sb.Append("(function(){\n");
+		sb.Append("\twindow.BV_THEME=").Append(theme).Append(";\n");
+		sb.Append("\tvar css=").Append(css).Append(";\n");
+		sb.Append("\tfunction apply(){\n");
+		sb.Append("\t\tvar target=document.head||document.documentElement;\n");
+		sb.Append("\t\tif(!target){return false;}\n");
+		sb.Append("\t\tvar style=document.createElement('style');\n");
+		sb.Append("\t\tstyle.id='bv-theme';\n");
+		sb.Append("\t\tstyle.textContent=css;\n");
+		sb.Append("\t\ttarget.appendChild(style);\n");
+		sb.Append("\t\treturn true;\n");
+		sb.Append("\t}\n");
+		sb.Append("\tif(!apply()){\n");
+		sb.Append("\t\tvar mo=new MutationObserver(function(){if(apply()){mo.disconnect();}});\n");
+		sb.Append("\t\tmo.observe(document,{childList:true});\n");
+		sb.Append("\t}\n");
+		sb.Append("})();\n");
+		return sb.ToString();
+	}
+
+	/// <summary>Desktop face behind the Raw tab and the WebView2 surface.</summary>
+	public static Color DesktopBackgroundColor => ToMediaColor(Semantic.DesktopBackground);
+
+	/// <summary>Body ink of the Rendered tab.</summary>
+	public static Color DesktopForegroundColor => ToMediaColor(Semantic.DesktopForeground);
+
+	/// <summary>Face of the Raw tab.</summary>
+	public static Color RawBackgroundColor => ToMediaColor(Semantic.RawBackground);
+
+	/// <summary>Ink of the Raw tab.</summary>
+	public static Color RawForegroundColor => ToMediaColor(Semantic.RawForeground);
+
+	/// <summary>
+	/// The desktop face as a GDI color, used for the WebView2 background so
+	/// there is no white flash before the stylesheet lands.
+	/// </summary>
+	public static System.Drawing.Color DesktopBackgroundColorGdi =>
+		ToGdiColor(Semantic.DesktopBackground);
+
+	private static void AppendRule(StringBuilder sb, Role role)
+	{
+		var body = new StringBuilder();
+		if (role.Foreground.Length > 0) body.Append("color:").Append(role.Foreground).Append(';');
+		if (role.Background.Length > 0) body.Append("background:").Append(role.Background).Append(';');
+		if (Math.Abs(role.SizeEm - 1.0) > 0.001) body.Append("font-size:").Append(Format(role.SizeEm)).Append("em;");
+		if (role.Bold) body.Append("font-weight:bold;");
+		if (role.Italic) body.Append("font-style:italic;");
+		if (role.Decoration.Length > 0) body.Append("text-decoration:").Append(role.Decoration).Append(';');
+		if (body.Length == 0) return;
+
+		sb.Append("/* ").Append(role.Label).Append(" */\n")
+			.Append(role.Selector).Append('{').Append(body).Append("}\n");
+	}
+
+	/// <summary>
+	/// Palette variables emitted into :root. Names are kebab-case so they
+	/// read as --bv-light-cyan in the inspector.
+	/// </summary>
+	private static IEnumerable<(string Name, string Hex)> PaletteVariables()
+	{
+		yield return ("black", Palette.Black);
+		yield return ("blue", Palette.Blue);
+		yield return ("green", Palette.Green);
+		yield return ("cyan", Palette.Cyan);
+		yield return ("red", Palette.Red);
+		yield return ("magenta", Palette.Magenta);
+		yield return ("brown", Palette.Brown);
+		yield return ("light-gray", Palette.LightGray);
+		yield return ("dark-gray", Palette.DarkGray);
+		yield return ("light-blue", Palette.LightBlue);
+		yield return ("light-green", Palette.LightGreen);
+		yield return ("light-cyan", Palette.LightCyan);
+		yield return ("light-red", Palette.LightRed);
+		yield return ("pink", Palette.Pink);
+		yield return ("yellow", Palette.Yellow);
+		yield return ("white", Palette.White);
+		yield return ("deep-blue", Palette.DeepBlue);
+		yield return ("desktop-bg", Semantic.DesktopBackground);
+		yield return ("desktop-fg", Semantic.DesktopForeground);
+		yield return ("panel-bg", Semantic.PanelBackground);
+		yield return ("panel-border", Semantic.PanelBorder);
+		yield return ("panel-border-strong", Semantic.PanelBorderStrong);
+		yield return ("selection-bg", Semantic.SelectionBackground);
+		yield return ("selection-fg", Semantic.SelectionForeground);
+		yield return ("accent", Semantic.Accent);
+		yield return ("success", Semantic.Success);
+		yield return ("failure", Semantic.Failure);
+		yield return ("warning", Semantic.Warning);
+		yield return ("info", Semantic.Info);
+		yield return ("dim", Semantic.Dim);
+	}
+
+	private static string Format(double value) =>
+		value.ToString("0.###", CultureInfo.InvariantCulture);
+
+	private static Color ToMediaColor(string hex) =>
+		(Color)ColorConverter.ConvertFromString(hex);
+
+	private static System.Drawing.Color ToGdiColor(string hex) =>
+		System.Drawing.Color.FromArgb(
+			Convert.ToByte(hex.Substring(1, 2), 16),
+			Convert.ToByte(hex.Substring(3, 2), 16),
+			Convert.ToByte(hex.Substring(5, 2), 16));
+}

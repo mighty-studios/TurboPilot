@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Media;
 using Microsoft.Web.WebView2.Wpf;
 using TurbolandTheme.Wpf.Controls;
 using TurboPilot.Dialogs;
@@ -13,6 +14,11 @@ public partial class MainWindow : TurbolandWindow
 	// The single file: URI that the WebView2 is allowed to navigate to.
 	private string? _outputHtmlUri;
 	private bool _webViewReady = false;
+
+	// The opening transcript is a document to read from the top, not a stream
+	// to follow. Only the first sync gets that treatment.
+	private bool _openedAtTop = false;
+	private bool _rawOpenedAtTop = false;
 
 	// The verbatim transcript shown in the Raw tab. It is the source of
 	// truth for both output views: the Rendered WebView2 always mirrors
@@ -27,12 +33,27 @@ public partial class MainWindow : TurbolandWindow
 	{
 		InitializeComponent();
 
+		// The Raw tab reads its face and ink from the same palette table the
+		// Rendered tab is styled from, using the editor pair: yellow source
+		// text on the blue field. The typeface is the theme's bundled DOS
+		// face, set in XAML.
+		richTextBoxOutput.Background = new SolidColorBrush(BorlandVisionTheme.RawBackgroundColor);
+		richTextBoxOutput.Foreground = new SolidColorBrush(BorlandVisionTheme.RawForegroundColor);
+		richTextBoxOutput.FontSize = BorlandVisionTheme.RawFontSize;
+
+		// Paint the WebView2 surface with the desktop blue before any
+		// stylesheet lands, so there is no white flash on first show.
+		webViewOutput.DefaultBackgroundColor = BorlandVisionTheme.DesktopBackgroundColorGdi;
+
 		// Seed the transcript through the shared API so Raw and Rendered
 		// start in sync.
-		AppendOutput("Welcome to TurboPilot!\r\n");
-		AppendOutput("This is the Raw output tab with retro styling.\r\n");
-		AppendOutput("Blue background with yellow text.\r\n");
-		AppendOutput("Support for white, red, green, and black text.\r\n");
+		AppendOutput(LoadSampleTranscript());
+
+		// Appending leaves the caret at the end, which is where the view
+		// scrolls when it is first realized. The opening sample is read from
+		// the top, so move the caret back before that happens.
+		richTextBoxOutput.CaretPosition = richTextBoxOutput.Document.ContentStart;
+		richTextBoxOutput.Loaded += RichTextBoxOutput_FirstRealized;
 
 		// Initialize WebView2 asynchronously
 		_ = InitializeWebViewAsync();
@@ -109,6 +130,13 @@ public partial class MainWindow : TurbolandWindow
 			// ── Lock down the WebView2 so it behaves as a pure display
 			// surface, not a general-purpose browser. Disable navigation
 			// affordances the user could accidentally trigger.
+			// Install the Borland Vision stylesheet and the diagram palette
+			// before any script in output.html runs, so the first frame the
+			// user sees is already themed. Registered on the environment, not
+			// the page, so it survives every reload.
+			await webViewOutput.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
+				BorlandVisionTheme.BuildBootstrapScript());
+
 			var settings = webViewOutput.CoreWebView2.Settings;
 			settings.AreDefaultContextMenusEnabled = false;
 			settings.AreBrowserAcceleratorKeysEnabled = false;
@@ -371,6 +399,27 @@ public partial class MainWindow : TurbolandWindow
 	public string OutputText => _outputText.ToString();
 
 	/// <summary>
+	/// The sample document both output views open with. It ships as markdown
+	/// text rather than markup because the Raw tab has to show exactly what
+	/// the Rendered tab renders. Line endings are normalized to CRLF so the
+	/// buffer, the Raw tab and the file agree.
+	/// </summary>
+	private static string LoadSampleTranscript()
+	{
+		var path = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "SampleTranscript.md");
+		try
+		{
+			var text = System.IO.File.ReadAllText(path);
+			return text.Replace("\r\n", "\n").Replace("\n", "\r\n");
+		}
+		catch
+		{
+			// Missing or unreadable sample is not worth a dialog.
+			return "TurboPilot\r\n";
+		}
+	}
+
+	/// <summary>
 	/// Appends text verbatim to the Raw tab and immediately syncs the
 	/// Rendered tab to the same content. Safe to call from any thread;
 	/// appends are applied in order on the UI thread.
@@ -425,6 +474,10 @@ public partial class MainWindow : TurbolandWindow
 	{
 		if (!_webViewReady) return;
 		_ = webViewOutput.CoreWebView2.ExecuteScriptAsync($"setTranscript({JsString(_outputText.ToString())})");
+
+		if (_openedAtTop) return;
+		_openedAtTop = true;
+		_ = webViewOutput.CoreWebView2.ExecuteScriptAsync("scrollToTop()");
 	}
 
 	/// <summary>
@@ -445,6 +498,22 @@ public partial class MainWindow : TurbolandWindow
 		{
 			WebsiteUrl = "https://github.com/mighty-studios/TurboPilot"
 		}.ShowDialog(this);
+	}
+
+	/// <summary>
+	/// Opens the Raw tab at the first line of the transcript. Fires again on
+	/// every later tab switch, so it guards itself.
+	/// </summary>
+	private void RichTextBoxOutput_FirstRealized(object sender, RoutedEventArgs e)
+	{
+		if (_rawOpenedAtTop) return;
+		_rawOpenedAtTop = true;
+
+		// The text view has not measured the document yet at this point, so
+		// the scroll has to wait for layout to finish.
+		richTextBoxOutput.Dispatcher.BeginInvoke(
+			System.Windows.Threading.DispatcherPriority.Input,
+			new Action(() => richTextBoxOutput.ScrollToVerticalOffset(0)));
 	}
 
 	// ── History navigation stubs ─────────────────────────────────────────────

@@ -58,19 +58,22 @@
             </Grid.RowDefinitions>
 
             <!-- Output tabs at the top (Rendered and Raw) -->
-            <TabControl Grid.Row="0" Margin="4,4,4,2" Style="{DynamicResource TurbolandTabControlStyle}">
-                <TabItem Header="Rendered" Background="Black" Foreground="White">
+            <!-- No Style key: the theme ships an implicit TabControl and
+                 TabItem style, and pointing at a key that does not exist
+                 leaves the control with the stock Windows chrome. -->
+            <TabControl Grid.Row="0" Margin="4,4,4,2">
+                <TabItem Header="Rendered">
                     <Grid>
+                        <!-- Face color is set in code from the theme table. -->
                         <wv2:WebView2 x:Name="webViewOutput" 
-								  HorizontalAlignment="Stretch" 
-								  VerticalAlignment="Stretch"
-								  DefaultBackgroundColor="Black" />
+                        			  HorizontalAlignment="Stretch" 
+                        			  VerticalAlignment="Stretch" />
                     </Grid>
                 </TabItem>
-                <TabItem Header="Raw" Background="#000080" Foreground="White">
+                <TabItem Header="Raw">
+                    <!-- Face and ink come from the theme table in code so the
+                         Raw tab can never drift from the Rendered tab. -->
                     <RichTextBox x:Name="richTextBoxOutput" 
-								Background="{DynamicResource Turboland.Brush.DesktopBackground}" 
-								Foreground="Yellow" 
 								FontFamily="{DynamicResource Turboland.Font.Primary}" 
 								FontSize="16" 
 								VerticalScrollBarVisibility="Auto" 

@@ -12,6 +12,8 @@
  *   appendTranscript(text)                 - append text and re-render
  *                                            (rapid appends are coalesced)
  *   clearAll()                             - clear all output
+ *   scrollToTop()                          - show the first line and stop
+ *                                            following the bottom
  *
  * Block API (structured rendering, reserved for future use):
  *   appendBlock(id, kind, label, content, isMarkdown)
@@ -163,18 +165,11 @@
 
 	// ── Marked configuration ───────────────────────────────────────
 
+	// marked dropped its highlight hook, so coloring happens on the live DOM
+	// after each render. See highlightCodeIn().
 	marked.setOptions({
 		breaks: true,
-		gfm: true,
-		highlight: function (code, lang) {
-			if (lang && hljs.getLanguage(lang)) {
-				try { return hljs.highlight(code, { language: lang }).value; }
-				catch (_) { /* fall through */ }
-			}
-			try { return hljs.highlightAuto(code).value; }
-			catch (_) { /* fall through */ }
-			return code;
-		}
+		gfm: true
 	});
 
 	// ── Mermaid lazy loader ────────────────────────────────────────
@@ -186,16 +181,16 @@
 		var script = document.createElement("script");
 		script.src = "mermaid.min.js";
 		script.onload = function () {
+			// Colors come from the host theme table (window.BV_THEME is
+			// published by the bootstrap script before this page runs), so a
+			// diagram can never drift from the text around it.
+			var bv = window.BV_THEME || {};
+			var themeVariables = Object.assign({}, bv);
+			delete themeVariables.theme;
 			mermaid.initialize({
 				startOnLoad: false,
-				theme: "dark",
-				themeVariables: {
-					darkMode: true,
-					background: "#0d0d0d",
-					primaryColor: "#3c70a0",
-					primaryTextColor: "#d2d2d2",
-					lineColor: "#555"
-				}
+				theme: bv.theme || "base",
+				themeVariables: themeVariables
 			});
 			mermaidLoaded = true;
 			mermaidLoading = false;
@@ -216,6 +211,21 @@
 
 	function renderMarkdown(content) {
 		return marked.parse(content || "");
+	}
+
+	/**
+	 * Runs highlight.js over every fenced block under root. Mermaid fences
+	 * are skipped: they are diagrams in waiting, not code, and coloring
+	 * their source would fight the renderer.
+	 */
+	function highlightCodeIn(root) {
+		if (!root || !window.hljs) return;
+		var codes = root.querySelectorAll("pre code");
+		for (var i = 0; i < codes.length; i++) {
+			var el = codes[i];
+			if (el.classList.contains("language-mermaid")) continue;
+			try { hljs.highlightElement(el); } catch (_) { /* leave it plain */ }
+		}
 	}
 
 	function processMermaidBlocks(containerEl) {
@@ -477,6 +487,7 @@
 
 	function renderTranscript(withDiagrams) {
 		outputEl.innerHTML = renderMarkdown(transcriptText);
+		highlightCodeIn(outputEl);
 		if (withDiagrams) {
 			processMermaidBlocks(outputEl);
 			processOversizedBlocks(outputEl);
@@ -493,6 +504,17 @@
 		if (transcriptDiagramTimer) { clearTimeout(transcriptDiagramTimer); transcriptDiagramTimer = 0; }
 		transcriptText = text || "";
 		renderTranscript(true);
+	};
+
+	/**
+	 * Jump to the top of the transcript and release the bottom pin. Used
+	 * once at startup: a document that opens with the app is meant to be
+	 * read from its first line, not its last. Scrolling back down re-pins
+	 * automatically, so streaming resumes following on its own.
+	 */
+	window.scrollToTop = function () {
+		stickToBottom = false;
+		window.scrollTo(0, 0);
 	};
 
 	/**
@@ -586,6 +608,7 @@
 		html += '</div>';
 
 		blockEl.innerHTML = html;
+		highlightCodeIn(blockEl);
 		outputEl.appendChild(blockEl);
 
 		blocks[id] = {
@@ -619,6 +642,7 @@
 
 			if (block.isMarkdown) {
 				contentEl.innerHTML = renderMarkdown(block.rawContent);
+				highlightCodeIn(contentEl);
 			} else {
 				contentEl.textContent = block.rawContent;
 			}
@@ -644,6 +668,7 @@
 
 		if (block.isMarkdown) {
 			contentEl.innerHTML = renderMarkdown(block.rawContent);
+			highlightCodeIn(contentEl);
 			processMermaidBlocks(contentEl);
 			processOversizedBlocks(contentEl);
 		}
@@ -740,6 +765,7 @@
 		var sec = sections[id];
 		if (!sec) return;
 		sec.bodyEl.innerHTML = isMarkdown ? renderMarkdown(content) : (content || "");
+		if (isMarkdown) highlightCodeIn(sec.bodyEl);
 		if (sec.element.open) {
 			try {
 				processOversizedBlocks(sec.bodyEl);
