@@ -51,8 +51,7 @@ public partial class MainWindow : TurbolandWindow
 
 		// Appending leaves the caret at the end, which is where the view
 		// scrolls when it is first realized. The opening sample is read from
-		// the top, so move the caret back before that happens.
-		richTextBoxOutput.CaretPosition = richTextBoxOutput.Document.ContentStart;
+		// the top, so rewind it once the text view exists.
 		richTextBoxOutput.Loaded += RichTextBoxOutput_FirstRealized;
 
 		// Initialize WebView2 asynchronously
@@ -509,11 +508,13 @@ public partial class MainWindow : TurbolandWindow
 		if (_rawOpenedAtTop) return;
 		_rawOpenedAtTop = true;
 
-		// The text view has not measured the document yet at this point, so
-		// the scroll has to wait for layout to finish.
+		// ScrollToHome moves the caret and the viewport together, which is how
+		// a text view is meant to be rewound. The call has to wait for layout,
+		// because the text view does not exist until the tab holding it is
+		// measured.
 		richTextBoxOutput.Dispatcher.BeginInvoke(
-			System.Windows.Threading.DispatcherPriority.Input,
-			new Action(() => richTextBoxOutput.ScrollToVerticalOffset(0)));
+			System.Windows.Threading.DispatcherPriority.Loaded,
+			new Action(richTextBoxOutput.ScrollToHome));
 	}
 
 	// ── History navigation stubs ─────────────────────────────────────────────
