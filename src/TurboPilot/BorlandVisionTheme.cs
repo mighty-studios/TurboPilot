@@ -40,7 +40,7 @@ public static class BorlandVisionTheme
 		"'Px437 IBM VGA 9x16', 'Consolas', 'Segoe UI Emoji', 'Courier New', monospace";
 
 	/// <summary>Base body size in CSS pixels. 16 puts the face on its native 9x16 cell.</summary>
-	public const double BaseFontSizePx = 16;
+	public const double BaseFontSizePx = 14;
 
 	/// <summary>Leading for prose. 1.0 is the raw text-mode cell; 1.25 reads better in long output.</summary>
 	public const double LineHeight = 1.25;
@@ -76,6 +76,7 @@ public static class BorlandVisionTheme
 		/// stripes and diagram clusters, where plain blue cannot separate two
 		/// adjacent faces.
 		/// </summary>
+		public const string MidBlue = "#000080";
 		public const string DeepBlue = "#000055";
 	}
 
@@ -86,7 +87,7 @@ public static class BorlandVisionTheme
 	public static class Semantic
 	{
 		/// <summary>The editor desktop: a blue field carrying light gray ink.</summary>
-		public const string DesktopBackground = Palette.Blue;
+		public const string DesktopBackground = Palette.MidBlue;
 		public const string DesktopForeground = Palette.LightGray;
 
 		/// <summary>
@@ -95,7 +96,7 @@ public static class BorlandVisionTheme
 		/// not match the Rendered body ink, which is gray, so the two tabs are
 		/// never mistaken for one another.
 		/// </summary>
-		public const string RawBackground = Palette.Blue;
+		public const string RawBackground = Palette.MidBlue;
 		public const string RawForeground = Palette.Yellow;
 
 		/// <summary>Recessed panels: code, diagrams, tool output.</summary>
@@ -153,17 +154,17 @@ public static class BorlandVisionTheme
 
 		// Headings
 		new("#output h1", "Heading 1: the title of a response",
-			Palette.Yellow, "", 1.5, Bold: true),
+			Palette.Yellow, "", 1.1, Bold: false),
 		new("#output h2", "Heading 2",
-			Palette.White, "", 1.3, Bold: true),
+			Palette.White, "", 1.1, Bold: false),
 		new("#output h3", "Heading 3",
-			Palette.LightCyan, "", 1.15, Bold: true),
+			Palette.LightCyan, "", 1.05, Bold: false),
 		new("#output h4", "Heading 4",
-			Palette.LightGreen, "", 1.05, Bold: true),
+			Palette.LightGreen, "", 1.05, Bold: false),
 		new("#output h5", "Heading 5",
-			Palette.Pink, "", 1.0, Bold: true),
+			Palette.Pink, "", 1.05, Bold: false),
 		new("#output h6", "Heading 6: the quietest rung, still legible on blue",
-			Palette.LightGray, "", 1.0, Bold: true),
+			Palette.LightGray, "", 1.05, Bold: false),
 
 		// Emphasis
 		new("#output strong", "Bold",
@@ -382,10 +383,11 @@ public static class BorlandVisionTheme
 			["pie5"] = Palette.Cyan,
 			["pie6"] = Palette.LightRed,
 			["pie7"] = Palette.LightGray,
-			["pieOuterStrokeColor"] = Palette.LightGray,
+			["pieOuterStrokeColor"] = Palette.Black,
 			["pieStrokeColor"] = Palette.Black,
 			["pieTitleTextSize"] = "16px",
 			["pieSectionTextSize"] = "14px",
+			["pieSectionTextColor"] = Palette.Black,
 		};
 
 	/// <summary>

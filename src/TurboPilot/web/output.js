@@ -190,7 +190,10 @@
 			mermaid.initialize({
 				startOnLoad: false,
 				theme: bv.theme || "base",
-				themeVariables: themeVariables
+				themeVariables: themeVariables,
+				sequence: {
+					wrap: true
+				}
 			});
 			mermaidLoaded = true;
 			mermaidLoading = false;
