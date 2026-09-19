@@ -415,6 +415,8 @@ public static class BorlandVisionTheme
 		sb.Append("html,body{font-family:var(--bv-font);")
 			.Append("font-size:var(--bv-base-size);line-height:var(--bv-line-height);}\n");
 
+		AppendScrollBarArrows(sb);
+
 		foreach (var role in Roles)
 		{
 			AppendRule(sb, role);
@@ -476,6 +478,32 @@ public static class BorlandVisionTheme
 	/// </summary>
 	public static System.Drawing.Color DesktopBackgroundColorGdi =>
 		ToGdiColor(Semantic.DesktopBackground);
+
+	/// <summary>
+	/// Arrow glyphs for the web scroll bar's arrow buttons. The WPF theme
+	/// draws CP437 triangles in the stipple color on a solid base face;
+	/// Chromium paints no default arrow once a scroll bar button is
+	/// styled, so the triangles are baked into data URIs here, where the
+	/// palette lives. The button face, edge and hover come from
+	/// output.css. The tile is 7x14: the 9x16 cell minus the 1px edge.
+	/// </summary>
+	private static void AppendScrollBarArrows(StringBuilder sb)
+	{
+		string fill = "%23" + Palette.Black.TrimStart('#');
+
+		static string Arrow(string points, string fillColor) =>
+			"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='14'"
+			+ "%3E%3Cpolygon points='" + points + "' fill='" + fillColor + "'/%3E%3C/svg%3E\")";
+
+		sb.Append("::-webkit-scrollbar-button:vertical:decrement{background-image:")
+			.Append(Arrow("3.5,4 0,9 7,9", fill)).Append(";}\n");
+		sb.Append("::-webkit-scrollbar-button:vertical:increment{background-image:")
+			.Append(Arrow("3.5,10 0,5 7,5", fill)).Append(";}\n");
+		sb.Append("::-webkit-scrollbar-button:horizontal:decrement{background-image:")
+			.Append(Arrow("1,7 6,3.5 6,10.5", fill)).Append(";}\n");
+		sb.Append("::-webkit-scrollbar-button:horizontal:increment{background-image:")
+			.Append(Arrow("6,7 1,3.5 1,10.5", fill)).Append(";}\n");
+	}
 
 	private static void AppendRule(StringBuilder sb, Role role)
 	{
