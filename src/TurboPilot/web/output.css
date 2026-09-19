@@ -26,10 +26,11 @@ html, body {
    ScrollTrackStipple black). The trough is a one-pixel checkerboard
    dither of the pair, exactly like the theme's StippleFill tile; the
    thumb is solid base with a hard stipple edge and turns green on
-   hover, like the theme's thumb. The 9x16 sizes are the theme's cell:
-   a vertical bar is one cell wide, a horizontal bar one row tall. */
+   hover, like the theme's thumb. A bar is one row (16px) thick on
+   either axis, matching the theme's default ScrollBarWidth and
+   ScrollBarHeight metrics. */
 ::-webkit-scrollbar {
-	width: 9px;
+	width: 16px;
 	height: 16px;
 }
 ::-webkit-scrollbar-track {
@@ -41,12 +42,21 @@ html, body {
    once a scroll bar button is styled and the glyph color is palette
    data. */
 ::-webkit-scrollbar-button {
-	width: 9px;
-	height: 16px;
 	background-color: var(--bv-light-gray);
 	background-repeat: no-repeat;
 	background-position: center;
 	border: 1px solid var(--bv-black);
+}
+/* Arrow buttons are one cell along the bar's own axis, like the theme's
+   fixed grid tracks: full bar width (16) and one row tall on a vertical
+   bar, one cell (9) wide and one row tall on a horizontal bar. */
+::-webkit-scrollbar-button:vertical {
+	width: 16px;
+	height: 16px;
+}
+::-webkit-scrollbar-button:horizontal {
+	width: 9px;
+	height: 16px;
 }
 ::-webkit-scrollbar-button:hover {
 	background-color: var(--bv-green);

@@ -485,24 +485,26 @@ public static class BorlandVisionTheme
 	/// Chromium paints no default arrow once a scroll bar button is
 	/// styled, so the triangles are baked into data URIs here, where the
 	/// palette lives. The button face, edge and hover come from
-	/// output.css. The tile is 7x14: the 9x16 cell minus the 1px edge.
+	/// output.css. The tile is the button's content area: 14x14 for a
+	/// vertical button (the 16x16 bar width and row minus the 1px edge)
+	/// and 7x14 for a horizontal one (the 9x16 cell minus the edge).
 	/// </summary>
 	private static void AppendScrollBarArrows(StringBuilder sb)
 	{
 		string fill = "%23" + Palette.Black.TrimStart('#');
 
-		static string Arrow(string points, string fillColor) =>
-			"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='14'"
+		static string Arrow(int w, int h, string points, string fillColor) =>
+			"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='" + w + "' height='" + h + "'"
 			+ "%3E%3Cpolygon points='" + points + "' fill='" + fillColor + "'/%3E%3C/svg%3E\")";
 
 		sb.Append("::-webkit-scrollbar-button:vertical:decrement{background-image:")
-			.Append(Arrow("3.5,4 0,9 7,9", fill)).Append(";}\n");
+			.Append(Arrow(14, 14, "7,4 2,10 12,10", fill)).Append(";}\n");
 		sb.Append("::-webkit-scrollbar-button:vertical:increment{background-image:")
-			.Append(Arrow("3.5,10 0,5 7,5", fill)).Append(";}\n");
+			.Append(Arrow(14, 14, "7,10 2,4 12,4", fill)).Append(";}\n");
 		sb.Append("::-webkit-scrollbar-button:horizontal:decrement{background-image:")
-			.Append(Arrow("1,7 6,3.5 6,10.5", fill)).Append(";}\n");
+			.Append(Arrow(7, 14, "1,7 6,3.5 6,10.5", fill)).Append(";}\n");
 		sb.Append("::-webkit-scrollbar-button:horizontal:increment{background-image:")
-			.Append(Arrow("6,7 1,3.5 1,10.5", fill)).Append(";}\n");
+			.Append(Arrow(7, 14, "6,7 1,3.5 1,10.5", fill)).Append(";}\n");
 	}
 
 	private static void AppendRule(StringBuilder sb, Role role)
