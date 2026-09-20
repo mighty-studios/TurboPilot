@@ -7,9 +7,9 @@ using TurbolandTheme.Wpf.Controls;
 namespace TurboPilot.Dialogs;
 
 /// <summary>
-/// Dialog for editing the ordered list of folders the application searches
-/// for customization items (agents, skills and instructions). Order matters:
-/// later entries override earlier ones. The edited list is persisted to
+/// Dialog for editing the list of folders the application searches
+/// for customization items (prompts, agents, skills, instructions and
+/// MCP servers). The edited list is persisted to
 /// settings when the user clicks OK. Scanning the folders for items is not
 /// yet implemented; the found-items and details panes are placeholders.
 /// Shown as a floating dialog window owned by the main window, so it sorts
@@ -72,10 +72,7 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 
 	private void UpdateButtonStates()
 	{
-		int i = listBox.SelectedIndex;
-		buttonDelete.IsEnabled = i >= 0;
-		buttonMoveUp.IsEnabled = i > 0;
-		buttonMoveDown.IsEnabled = i >= 0 && i < _folders.Count - 1;
+		buttonDelete.IsEnabled = listBox.SelectedIndex >= 0;
 	}
 
 	private void OnListSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -134,22 +131,6 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 		ReloadList();
 		if (_folders.Count > 0)
 			listBox.SelectedIndex = Math.Min(i, _folders.Count - 1);
-	}
-
-	private void OnMoveUp(object sender, RoutedEventArgs e) => MoveSelected(-1);
-
-	private void OnMoveDown(object sender, RoutedEventArgs e) => MoveSelected(+1);
-
-	private void MoveSelected(int delta)
-	{
-		int i = listBox.SelectedIndex;
-		int j = i + delta;
-		if (i < 0 || j < 0 || j >= _folders.Count)
-			return;
-
-		(_folders[i], _folders[j]) = (_folders[j], _folders[i]);
-		ReloadList();
-		listBox.SelectedIndex = j;
 	}
 
 	private bool IsDuplicate(string candidate) =>

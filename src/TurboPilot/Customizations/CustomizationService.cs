@@ -9,9 +9,9 @@ namespace TurboPilot.Customizations;
 /// customization search roots and keeps the resulting lists in memory and
 /// on disk.
 ///
-/// Search order, following the GitHub Copilot convention plus our own:
+/// Search roots, following the GitHub Copilot convention plus our own:
 ///   1. The personal folder, %USERPROFILE%\.copilot
-///   2. The user-defined customization folders, in their configured order
+///   2. The user-defined customization folders (order not significant)
 ///   3. The workspace .github folder
 ///
 /// Within each root the standard layout is scanned:

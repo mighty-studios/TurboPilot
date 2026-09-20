@@ -22,9 +22,9 @@ public sealed class Settings
 	public string? LastWorkspacePath { get; set; }
 
 	/// <summary>
-	/// Ordered list of folders searched for customization items
-	/// (agents, skills and instructions). Later entries override
-	/// earlier ones for name collisions.
+	/// List of folders searched for customization items (prompts,
+	/// agents, skills, instructions and MCP servers). Order is not
+	/// significant; duplicate short names coexist with suffixes.
 	/// </summary>
 	public List<string> CustomizationFolders { get; set; } = new();
 

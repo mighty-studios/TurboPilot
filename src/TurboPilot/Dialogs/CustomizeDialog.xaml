@@ -18,14 +18,13 @@
         </DataTemplate>
     </ctl:TurbolandFloatingDialog.Resources>
 
-    <!-- Edit the ordered list of folders the application searches for
-	customization items (agents, skills and instructions). Order matters:
-	later entries override earlier ones. The floating dialog sizes to its
-	content, which overrides Width and Height at runtime; the designer's
-	Width/Height are captured as MinWidth/MinHeight in OnInitialized, so
-	they act as the minimum dialog size. The found-items tabs list the
-	collected customization items with enable checkboxes and a details
-	pane; Add To Prompt is a placeholder until item management. -->
+    <!-- Edit the list of folders the application searches for
+	customization items. The floating dialog sizes to its content, which
+	overrides Width and Height at runtime; the designer's Width/Height
+	are captured as MinWidth/MinHeight in OnInitialized, so they act as
+	the minimum dialog size. The found-items tabs list the collected
+	customization items with enable checkboxes and a details pane; Add
+	To Prompt is a placeholder until item management. -->
     <StackPanel Margin="10,0,10,0">
         <Label Content="Search Paths For Customization Items (user folder &amp; workspace automatic)"/>
 
@@ -44,11 +43,7 @@
             <StackPanel Grid.Column="1" Width="96">
                 <Button x:Name="buttonAdd" Content="Add" Click="OnAdd"
 						Margin="0,0,0,6"/>
-                <Button x:Name="buttonDelete" Content="Delete" Click="OnDelete"
-						Margin="0,0,0,6"/>
-                <Button x:Name="buttonMoveUp" Content="Move Up" Click="OnMoveUp"
-						Margin="0,0,0,6"/>
-                <Button x:Name="buttonMoveDown" Content="Move Down" Click="OnMoveDown"/>
+                <Button x:Name="buttonDelete" Content="Delete" Click="OnDelete"/>
             </StackPanel>
         </Grid>
 
