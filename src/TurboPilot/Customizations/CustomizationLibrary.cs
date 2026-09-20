@@ -23,4 +23,10 @@ public sealed class CustomizationLibrary
 
 	/// <summary>Instructions from instructions/*.instructions.md under each root.</summary>
 	public Dictionary<string, CustomizationItem> Instructions { get; set; } = new(PathComparer);
+
+	/// <summary>
+	/// MCP server definitions from *.mcp.json files at each root. One
+	/// entry per server, keyed by file path and server name.
+	/// </summary>
+	public Dictionary<string, CustomizationItem> McpServers { get; set; } = new(PathComparer);
 }

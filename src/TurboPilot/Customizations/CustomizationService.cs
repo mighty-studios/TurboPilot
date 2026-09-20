@@ -15,9 +15,11 @@ namespace TurboPilot.Customizations;
 ///   3. The workspace .github folder
 ///
 /// Within each root the standard layout is scanned:
-///   prompts/*.md, agents/*.md, skills/[name]/SKILL.md and
-///   instructions/*.instructions.md
-/// (top-level files only; a skill is its whole folder, keyed by its SKILL.md).
+///   prompts/*.md, agents/*.md, skills/[name]/SKILL.md,
+///   instructions/*.instructions.md and *.mcp.json
+/// (top-level files only; a skill is its whole folder, keyed by its SKILL.md,
+/// and each server inside an MCP config file is its own entry, keyed by the
+/// file path and the server name).
 ///
 /// A rescan builds fresh lists but transfers the enabled flag from the
 /// previous lists for items found at the same file path, so user toggles
@@ -65,6 +67,7 @@ public static class CustomizationService
 		TransferEnabled(previous.Agents, library.Agents);
 		TransferEnabled(previous.Skills, library.Skills);
 		TransferEnabled(previous.Instructions, library.Instructions);
+		TransferEnabled(previous.McpServers, library.McpServers);
 
 		Save(library);
 		Current = library;
@@ -80,6 +83,7 @@ public static class CustomizationService
 		var usedAgentNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		var usedSkillNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		var usedInstructionNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var usedMcpNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
 		foreach (string root in GetSearchRoots(workspaceFolder))
 		{
@@ -87,6 +91,7 @@ public static class CustomizationService
 			CollectAgents(root, library, usedAgentNames);
 			CollectSkills(root, library, usedSkillNames);
 			CollectInstructions(root, library, usedInstructionNames);
+			CollectMcpServers(root, library, usedMcpNames);
 		}
 
 		return library;
@@ -166,6 +171,31 @@ public static class CustomizationService
 			library.Instructions[file] = new CustomizationItem { FilePath = file, Name = name };
 		}
 	}
+
+	private static void CollectMcpServers(string root, CustomizationLibrary library, HashSet<string> usedNames)
+	{
+		foreach (string file in EnumerateFiles(root, "*.mcp.json"))
+		{
+			foreach (string serverName in McpConfig.ReadServerNames(file))
+			{
+				string key = MakeKey(file, serverName);
+				string name = MakeUniqueName(serverName, usedNames);
+				library.McpServers[key] = new CustomizationItem
+				{
+					FilePath = file,
+					Element = serverName,
+					Name = name,
+				};
+			}
+		}
+	}
+
+	/// <summary>
+	/// Map key for an item defined inside a shared file: the file path
+	/// plus the element name, so several servers in one config each get
+	/// their own enabled state and rescan identity.
+	/// </summary>
+	public static string MakeKey(string filePath, string element) => $"{filePath}#{element}";
 
 	private static IEnumerable<string> EnumerateFiles(string directory, string searchPattern) =>
 		Directory.Exists(directory)
@@ -262,6 +292,7 @@ public static class CustomizationService
 		library.Agents = new(library.Agents ?? new(), CustomizationLibrary.PathComparer);
 		library.Skills = new(library.Skills ?? new(), CustomizationLibrary.PathComparer);
 		library.Instructions = new(library.Instructions ?? new(), CustomizationLibrary.PathComparer);
+		library.McpServers = new(library.McpServers ?? new(), CustomizationLibrary.PathComparer);
 		return library;
 	}
 }

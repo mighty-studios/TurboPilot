@@ -27,7 +27,7 @@
 	collected customization items with enable checkboxes and a details
 	pane; Add To Prompt is a placeholder until item management. -->
     <StackPanel Margin="10,0,10,0">
-        <Label Content="Search Paths For Agents, Skills and Instructions:"/>
+        <Label Content="Search Paths For Customization Items (user folder &amp; workspace automatic)"/>
 
         <!-- Folder list with its side button column. -->
         <Grid Margin="0,4,0,0">
@@ -82,6 +82,12 @@
                 </TabItem>
                 <TabItem x:Name="tabInstructions" Header="Instructions">
                     <ListBox x:Name="listInstructions"
+							ItemTemplate="{StaticResource FoundItemTemplate}"
+							SelectionChanged="OnFoundItemSelected"
+							CheckBox.Checked="OnItemToggled" CheckBox.Unchecked="OnItemToggled"/>
+                </TabItem>
+                <TabItem x:Name="tabMcpServers" Header="MCP Servers">
+                    <ListBox x:Name="listMcpServers"
 							ItemTemplate="{StaticResource FoundItemTemplate}"
 							SelectionChanged="OnFoundItemSelected"
 							CheckBox.Checked="OnItemToggled" CheckBox.Unchecked="OnItemToggled"/>

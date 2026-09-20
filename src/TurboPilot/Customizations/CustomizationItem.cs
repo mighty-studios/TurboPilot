@@ -23,6 +23,12 @@ public sealed class CustomizationItem
 	public required string Name { get; set; }
 
 	/// <summary>
+	/// Sub-identifier when one file defines several items: the server
+	/// name inside an MCP config file. Null for single-item files.
+	/// </summary>
+	public string? Element { get; set; }
+
+	/// <summary>
 	/// Whether the item participates when a session starts.
 	/// Items are enabled by default.
 	/// </summary>

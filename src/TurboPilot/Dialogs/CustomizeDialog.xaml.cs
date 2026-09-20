@@ -170,6 +170,7 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 		PopulateTab(listAgents, tabAgents, "Agents", library.Agents, onlyEnabled);
 		PopulateTab(listSkills, tabSkills, "Skills", library.Skills, onlyEnabled);
 		PopulateTab(listInstructions, tabInstructions, "Instructions", library.Instructions, onlyEnabled);
+		PopulateTab(listMcpServers, tabMcpServers, "MCP Servers", library.McpServers, onlyEnabled);
 		textBoxDetails.Text = string.Empty;
 	}
 
@@ -202,7 +203,8 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 
 		// Keep the details pane honest if the toggled item is selected.
 		if (listPrompts.SelectedItem == item || listAgents.SelectedItem == item
-			|| listSkills.SelectedItem == item || listInstructions.SelectedItem == item)
+			|| listSkills.SelectedItem == item || listInstructions.SelectedItem == item
+			|| listMcpServers.SelectedItem == item)
 		{
 			ShowDetails(item);
 		}
@@ -239,9 +241,48 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 			$"State: {(item.Enabled ? "Enabled" : "Disabled")}",
 		};
 
-		AppendFrontMatter(lines, item.FilePath);
+		if (CustomizationService.Current.McpServers.ContainsKey(CustomizationService.MakeKey(item.FilePath, item.Element ?? string.Empty)))
+			AppendMcpDetails(lines, item);
+		else
+			AppendFrontMatter(lines, item.FilePath);
 
 		textBoxDetails.Text = string.Join(Environment.NewLine, lines);
+	}
+
+	/// <summary>
+	/// Adds the server's own definition from the MCP config file. Values
+	/// under env and headers are credential material, so McpConfig renders
+	/// only their key names.
+	/// </summary>
+	private static void AppendMcpDetails(List<string> lines, CustomizationItem item)
+	{
+		if (item.Element is null)
+			return;
+
+		var fields = McpConfig.ReadServerFields(item.FilePath, item.Element);
+		if (fields is null || fields.Count == 0)
+			return;
+
+		string? description = null;
+		var others = new List<KeyValuePair<string, string>>();
+		foreach (var field in fields)
+		{
+			if (description is null && string.Equals(field.Key, "description", StringComparison.OrdinalIgnoreCase))
+				description = field.Value;
+			else
+				others.Add(field);
+		}
+
+		if (!string.IsNullOrWhiteSpace(description))
+		{
+			lines.Add(string.Empty);
+			lines.Add($"Description: {description}");
+		}
+
+		lines.Add(string.Empty);
+		lines.Add("Metadata:");
+		foreach (var (key, value) in others)
+			lines.Add($"  {key}: {value}");
 	}
 
 	/// <summary>
@@ -281,6 +322,7 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 		if (library.Agents.ContainsKey(item.FilePath)) return "Agent";
 		if (library.Skills.ContainsKey(item.FilePath)) return "Skill";
 		if (library.Instructions.ContainsKey(item.FilePath)) return "Instruction";
+		if (library.McpServers.ContainsKey(CustomizationService.MakeKey(item.FilePath, item.Element ?? string.Empty))) return "MCP Server";
 		return "Item";
 	}
 
