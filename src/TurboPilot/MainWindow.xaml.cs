@@ -56,6 +56,45 @@ public partial class MainWindow : TurbolandWindow
 
 		// Initialize WebView2 asynchronously
 		_ = InitializeWebViewAsync();
+
+		// No session is active until the user starts or resumes one.
+		SetSessionActive(false);
+	}
+
+	// -- Session state ---------------------------------------------------------
+
+	/// <summary>
+	/// True while a session is active. Updated only by SetSessionActive.
+	/// </summary>
+	public bool IsSessionActive { get; private set; }
+
+	/// <summary>
+	/// Bulk-enables or disables every control that requires an active
+	/// session. The Session and Help menus, the output tabs and the
+	/// splitter stay available in both states: the user must always be
+	/// able to start a session, read the transcript or get help. The
+	/// Tools menu, the prompt input, the history navigation buttons and
+	/// the attachments, Stop and Send buttons are gated on session state.
+	/// Once prompt history cycling exists, the history buttons will be
+	/// further restricted to times when there is somewhere to cycle to.
+	/// </summary>
+	public void SetSessionActive(bool active)
+	{
+		IsSessionActive = active;
+
+		menuTools.IsEnabled = active;
+
+		richTextBoxInput.IsEnabled = active;
+		buttonHistoryPrev.IsEnabled = active;
+		buttonHistoryNext.IsEnabled = active;
+
+		buttonAttachments.IsEnabled = active;
+		buttonStop.IsEnabled = active;
+		buttonSend.IsEnabled = active;
+
+		statusTextBlock.Text = active
+			? "Ready"
+			: "Start or resume a session to begin.";
 	}
 
 	// ── Splitter drag handler ────────────────────────────────────────────────
@@ -549,7 +588,9 @@ public partial class MainWindow : TurbolandWindow
 			return;
 
 		// TODO: Start the AI session with the selected workspace folder
-		// For now, just update the status bar
+		// For now, bring the session-dependent controls online and
+		// report the workspace in the status bar.
+		SetSessionActive(true);
 		statusTextBlock.Text = $"Session started in: {dialog.WorkspacePath}";
 	}
 }

@@ -17,14 +17,14 @@
                 <MenuItem Header="_New Session..." Click="OnNewSession"/>
                 <MenuItem Header="_Past Sessions..."/>
                 <Separator/>
+                <MenuItem Header="C_ustomization..."/>
+                <Separator/>
                 <MenuItem Header="E_xit"/>
             </MenuItem>
-            <MenuItem Header="_Tools">
+            <MenuItem x:Name="menuTools" Header="_Tools">
                 <MenuItem Header="Open _Powershell"/>
                 <MenuItem Header="Open _Explorer"/>
                 <MenuItem Header="Open _VSCode"/>
-                <Separator/>
-                <MenuItem Header="S_kills..."/>
             </MenuItem>
             <MenuItem Header="_Help">
                 <MenuItem Header="_About..." Click="OnAbout"/>
@@ -33,13 +33,15 @@
 
         <StatusBar DockPanel.Dock="Bottom" Height="43">
             <StatusBarItem x:Name="statusBarItem">
-                <TextBlock x:Name="statusTextBlock" Text="Ready"/>
+                <TextBlock x:Name="statusTextBlock" Text="Start or resume a session to begin."/>
             </StatusBarItem>
             <!-- Buttons on the right side of the toolbar -->
             <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,5,0">
-                <Button x:Name="buttonAttachments" Content="+0" Width="40" Height="25" Margin="0,0,5,0" Background="#565656" Foreground="White" BorderBrush="Gray" IsEnabled="False" Click="ButtonAttachments_Click"/>
-                <Button Content="Stop" Width="60" Height="25" Margin="0,0,5,0" Background="#565656" Foreground="White" BorderBrush="Gray" IsEnabled="False"/>
-                <Button Content="Send" Width="80" Height="25" Background="#3C70A0" Foreground="White" BorderBrush="Gray" IsEnabled="False"/>
+                <!-- Session-dependent controls: enabled and disabled in bulk
+                     by SetSessionActive, not here. -->
+                <Button x:Name="buttonAttachments" Content="+0" Width="40" Height="25" Margin="0,0,5,0" Background="#565656" Foreground="White" BorderBrush="Gray" Click="ButtonAttachments_Click"/>
+                <Button x:Name="buttonStop" Content="Stop" Width="60" Height="25" Margin="0,0,5,0" Background="#565656" Foreground="White" BorderBrush="Gray"/>
+                <Button x:Name="buttonSend" Content="Send" Width="80" Height="25" Background="#3C70A0" Foreground="White" BorderBrush="Gray"/>
             </StackPanel>
         </StatusBar>
 
@@ -117,7 +119,6 @@
 								FontSize="8" 
 								Height="20" 
 								VerticalAlignment="Top" 
-								IsEnabled="False"
 								Click="ButtonHistoryPrev_Click"/>
                         <Button x:Name="buttonHistoryNext" 
 								Content="▼" 
@@ -128,7 +129,6 @@
 								FontSize="8" 
 								Height="20" 
 								VerticalAlignment="Bottom" 
-								IsEnabled="False"
 								Click="ButtonHistoryNext_Click"/>
                     </StackPanel>
                 </Border>
