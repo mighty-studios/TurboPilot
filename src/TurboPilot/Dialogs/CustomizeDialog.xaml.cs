@@ -193,6 +193,21 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 
 	private void OnOnlyEnabledChanged(object sender, RoutedEventArgs e) => RefreshFoundItems();
 
+	// A lone radio button stays checked when clicked, but this one is a
+	// filter, not part of a choice group: clicking it while checked must
+	// clear it. Remember the state before the toggle happens, then act on
+	// it in Click.
+	private bool _onlyEnabledWasChecked;
+
+	private void OnOnlyEnabledBeforeToggle(object sender, RoutedEventArgs e)
+		=> _onlyEnabledWasChecked = radioOnlyEnabled.IsChecked == true;
+
+	private void OnOnlyEnabledClick(object sender, RoutedEventArgs e)
+	{
+		if (_onlyEnabledWasChecked)
+			radioOnlyEnabled.IsChecked = false;
+	}
+
 	/// <summary>
 	/// A row in one of the found-items lists was selected: show its
 	/// details. Selection never changes the enabled flag; only the

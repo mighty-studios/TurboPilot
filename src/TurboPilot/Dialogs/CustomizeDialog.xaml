@@ -103,6 +103,9 @@
             <StackPanel VerticalAlignment="Center" Grid.ColumnSpan="2" Margin="0,0,59,0">
                 <RadioButton x:Name="radioOnlyEnabled" Content="Only Show Enabled"
                 		VerticalAlignment="Center"
+                		PreviewMouseLeftButtonDown="OnOnlyEnabledBeforeToggle"
+                		PreviewKeyDown="OnOnlyEnabledBeforeToggle"
+                		Click="OnOnlyEnabledClick"
                 		Checked="OnOnlyEnabledChanged" Unchecked="OnOnlyEnabledChanged"/>
                 <Button x:Name="buttonAddToPrompt" Content="Add To Prompt" Width="149" IsEnabled="False" HorizontalAlignment="Left" Margin="0,6,0,0"/>
             </StackPanel>
