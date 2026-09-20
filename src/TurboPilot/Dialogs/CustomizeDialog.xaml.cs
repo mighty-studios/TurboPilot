@@ -230,11 +230,47 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 
 	private void ShowDetails(CustomizationItem item)
 	{
-		textBoxDetails.Text = string.Join(Environment.NewLine,
+		var lines = new List<string>
+		{
 			$"Type: {TypeNameFor(item)}",
 			$"Name: {item.Name}",
 			$"Path: {item.FilePath}",
-			$"State: {(item.Enabled ? "Enabled" : "Disabled")}");
+			$"State: {(item.Enabled ? "Enabled" : "Disabled")}",
+		};
+
+		AppendFrontMatter(lines, item.FilePath);
+
+		textBoxDetails.Text = string.Join(Environment.NewLine, lines);
+	}
+
+	/// <summary>
+	/// Adds the item's description and remaining front matter fields to
+	/// the details lines. Sections are omitted when the file has no
+	/// front matter or cannot be read.
+	/// </summary>
+	private static void AppendFrontMatter(List<string> lines, string filePath)
+	{
+		var frontMatter = FrontMatter.Read(filePath);
+		if (frontMatter.Fields.Count == 0)
+			return;
+
+		string? description = frontMatter.Get("description");
+		if (!string.IsNullOrWhiteSpace(description))
+		{
+			lines.Add(string.Empty);
+			lines.Add($"Description: {description}");
+		}
+
+		var others = frontMatter.Fields
+			.Where(f => !string.Equals(f.Key, "description", StringComparison.OrdinalIgnoreCase))
+			.ToList();
+		if (others.Count > 0)
+		{
+			lines.Add(string.Empty);
+			lines.Add("Metadata:");
+			foreach (var (key, value) in others)
+				lines.Add($"  {key}: {value}");
+		}
 	}
 
 	private string TypeNameFor(CustomizationItem item)
