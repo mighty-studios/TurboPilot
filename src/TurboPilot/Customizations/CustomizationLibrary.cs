@@ -29,4 +29,27 @@ public sealed class CustomizationLibrary
 	/// entry per server, keyed by file path and server name.
 	/// </summary>
 	public Dictionary<string, CustomizationItem> McpServers { get; set; } = new(PathComparer);
+
+	/// <summary>
+	/// Deep copy of all five maps and their items. Callers (such as the
+	/// Customization dialog) edit the copy freely; the original is untouched
+	/// until the copy is committed.
+	/// </summary>
+	public CustomizationLibrary Clone() => new()
+	{
+		Prompts = CloneMap(Prompts),
+		Agents = CloneMap(Agents),
+		Skills = CloneMap(Skills),
+		Instructions = CloneMap(Instructions),
+		McpServers = CloneMap(McpServers),
+	};
+
+	private static Dictionary<string, CustomizationItem> CloneMap(
+		Dictionary<string, CustomizationItem> source)
+	{
+		var copy = new Dictionary<string, CustomizationItem>(PathComparer);
+		foreach (var (key, item) in source)
+			copy[key] = item.Clone();
+		return copy;
+	}
 }

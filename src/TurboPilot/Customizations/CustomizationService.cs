@@ -74,6 +74,17 @@ public static class CustomizationService
 		return library;
 	}
 
+	/// <summary>
+	/// Adopts a working copy as the live library and persists it, without
+	/// rescanning the roots. A following <see cref="Rescan"/> carries the
+	/// copy's enabled flags onto whatever is found on disk.
+	/// </summary>
+	public static void Commit(CustomizationLibrary workingCopy)
+	{
+		Current = workingCopy;
+		Save(workingCopy);
+	}
+
 	// ------------------------------------------------------------------ scan
 
 	private static CustomizationLibrary Collect(string? workspaceFolder)

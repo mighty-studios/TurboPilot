@@ -33,4 +33,13 @@ public sealed class CustomizationItem
 	/// Items are enabled by default.
 	/// </summary>
 	public bool Enabled { get; set; } = true;
+
+	/// <summary>Independent copy, so edits can be staged and discarded.</summary>
+	public CustomizationItem Clone() => new()
+	{
+		FilePath = FilePath,
+		Element = Element,
+		Name = Name,
+		Enabled = Enabled,
+	};
 }

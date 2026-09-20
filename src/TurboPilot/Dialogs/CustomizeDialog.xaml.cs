@@ -9,15 +9,21 @@ namespace TurboPilot.Dialogs;
 /// <summary>
 /// Dialog for editing the list of folders the application searches
 /// for customization items (prompts, agents, skills, instructions and
-/// MCP servers). The edited list is persisted to
-/// settings when the user clicks OK. Scanning the folders for items is not
-/// yet implemented; the found-items and details panes are placeholders.
+/// MCP servers) and for toggling which collected items participate.
+/// All edits happen on working copies held by the dialog: the folder
+/// list, the item enabled flags and the settings file are only touched
+/// when the user clicks OK, and Cancel discards everything. On OK the
+/// staged flags are committed and the roots are rescanned.
 /// Shown as a floating dialog window owned by the main window, so it sorts
 /// above the WebView2 content and against other windows by OS rule.
 /// </summary>
 public partial class CustomizeDialog : TurbolandFloatingDialog
 {
 	private readonly List<string> _folders;
+
+	// Deep copy of the collected library; the live lists stay untouched
+	// until Commit on OK.
+	private readonly CustomizationLibrary _library;
 
 	/// <summary>
 	/// The edited list of search folders. Only meaningful after the dialog
@@ -33,6 +39,8 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 			.Where(f => !string.IsNullOrWhiteSpace(f))
 			.Select(f => f.Trim())
 			.ToList();
+
+		_library = CustomizationService.Current.Clone();
 
 		ReloadList();
 		UpdateButtonStates();
@@ -145,7 +153,7 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 	/// </summary>
 	private void RefreshFoundItems()
 	{
-		var library = CustomizationService.Current;
+		var library = _library;
 		bool onlyEnabled = radioOnlyEnabled.IsChecked == true;
 		PopulateTab(listPrompts, tabPrompts, "Prompts", library.Prompts, onlyEnabled);
 		PopulateTab(listAgents, tabAgents, "Agents", library.Agents, onlyEnabled);
@@ -166,10 +174,10 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 	}
 
 	/// <summary>
-	/// A checkbox in one of the found-items lists was toggled. The TwoWay
-	/// binding already wrote the flag back to the item; persist so the
-	/// choice survives the session. The lists are deliberately not rebuilt
-	/// here: the row the user just clicked must not vanish under the filter.
+	/// A checkbox in one of the found-items lists was toggled. The flag
+	/// lands on the staged copy only; nothing is persisted until OK. The
+	/// lists are deliberately not rebuilt here: the row the user just
+	/// clicked must not vanish under the filter.
 	/// </summary>
 	private void OnItemToggled(object sender, RoutedEventArgs e)
 	{
@@ -180,7 +188,6 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 		// Write the flag explicitly rather than trusting the binding's
 		// update order relative to this event.
 		item.Enabled = checkBox.IsChecked == true;
-		CustomizationService.Save(CustomizationService.Current);
 
 		// Keep the details pane honest if the toggled item is selected.
 		if (listPrompts.SelectedItem == item || listAgents.SelectedItem == item
@@ -237,7 +244,7 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 			$"State: {(item.Enabled ? "Enabled" : "Disabled")}",
 		};
 
-		if (CustomizationService.Current.McpServers.ContainsKey(CustomizationService.MakeKey(item.FilePath, item.Element ?? string.Empty)))
+		if (_library.McpServers.ContainsKey(CustomizationService.MakeKey(item.FilePath, item.Element ?? string.Empty)))
 			AppendMcpDetails(lines, item);
 		else
 			AppendFrontMatter(lines, item.FilePath);
@@ -313,7 +320,7 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 
 	private string TypeNameFor(CustomizationItem item)
 	{
-		var library = CustomizationService.Current;
+		var library = _library;
 		if (library.Prompts.ContainsKey(item.FilePath)) return "Prompt";
 		if (library.Agents.ContainsKey(item.FilePath)) return "Agent";
 		if (library.Skills.ContainsKey(item.FilePath)) return "Skill";
@@ -330,8 +337,10 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 		settings.CustomizationFolders = new List<string>(_folders);
 		settings.Save();
 
-		// The search roots changed: rebuild the customization lists so the
-		// next session (and the Items Found tree) sees the new folders.
+		// Apply the staged enabled flags, then rebuild from the (possibly
+		// changed) roots; the rescan carries the committed flags across by
+		// key so nothing the user just chose is lost.
+		CustomizationService.Commit(_library);
 		CustomizationService.Rescan(settings.LastWorkspacePath);
 
 		Close(true);
