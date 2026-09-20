@@ -37,6 +37,22 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 		UpdateButtonStates();
 	}
 
+	protected override void OnInitialized(EventArgs e)
+	{
+		base.OnInitialized(e);
+
+		// The floating dialog sizes to its content, which overrides any
+		// Width/Height set in the designer. Capture the designer's size
+		// as the minimum so the dialog never opens smaller than designed,
+		// while still growing if the content ever needs more room.
+		if (!double.IsNaN(Width))
+			MinWidth = Width;
+		if (!double.IsNaN(Height))
+			MinHeight = Height;
+		Width = double.NaN;
+		Height = double.NaN;
+	}
+
 	// ------------------------------------------------------------------ list
 
 	private void ReloadList()
