@@ -593,4 +593,15 @@ public partial class MainWindow : TurbolandWindow
 		SetSessionActive(true);
 		statusTextBlock.Text = $"Session started in: {dialog.WorkspacePath}";
 	}
+
+	/// <summary>
+	/// Opens the Customization dialog for editing the search folder list.
+	/// Modal and owned: the OS keeps it above the main window (and its
+	/// WebView2 airspace), and the blocking call means it cannot stack
+	/// a duplicate. The dialog persists the list to settings itself.
+	/// </summary>
+	private void OnCustomization(object sender, RoutedEventArgs e)
+	{
+		new Dialogs.CustomizeDialog().ShowDialog(this);
+	}
 }

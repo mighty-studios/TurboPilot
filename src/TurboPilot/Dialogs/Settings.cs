@@ -22,6 +22,13 @@ public sealed class Settings
 	public string? LastWorkspacePath { get; set; }
 
 	/// <summary>
+	/// Ordered list of folders searched for customization items
+	/// (agents, skills and instructions). Later entries override
+	/// earlier ones for name collisions.
+	/// </summary>
+	public List<string> CustomizationFolders { get; set; } = new();
+
+	/// <summary>
 	/// Loads settings from disk. Returns a default instance if the file
 	/// doesn't exist or fails to parse.
 	/// </summary>
