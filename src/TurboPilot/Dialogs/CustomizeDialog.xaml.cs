@@ -167,6 +167,7 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 		var library = CustomizationService.Current;
 		bool onlyEnabled = radioOnlyEnabled.IsChecked == true;
 		PopulateTab(listPrompts, tabPrompts, "Prompts", library.Prompts, onlyEnabled);
+		PopulateTab(listAgents, tabAgents, "Agents", library.Agents, onlyEnabled);
 		PopulateTab(listSkills, tabSkills, "Skills", library.Skills, onlyEnabled);
 		PopulateTab(listInstructions, tabInstructions, "Instructions", library.Instructions, onlyEnabled);
 		textBoxDetails.Text = string.Empty;
@@ -200,8 +201,8 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 		CustomizationService.Save(CustomizationService.Current);
 
 		// Keep the details pane honest if the toggled item is selected.
-		if (listPrompts.SelectedItem == item || listSkills.SelectedItem == item
-			|| listInstructions.SelectedItem == item)
+		if (listPrompts.SelectedItem == item || listAgents.SelectedItem == item
+			|| listSkills.SelectedItem == item || listInstructions.SelectedItem == item)
 		{
 			ShowDetails(item);
 		}
@@ -277,6 +278,7 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 	{
 		var library = CustomizationService.Current;
 		if (library.Prompts.ContainsKey(item.FilePath)) return "Prompt";
+		if (library.Agents.ContainsKey(item.FilePath)) return "Agent";
 		if (library.Skills.ContainsKey(item.FilePath)) return "Skill";
 		if (library.Instructions.ContainsKey(item.FilePath)) return "Instruction";
 		return "Item";

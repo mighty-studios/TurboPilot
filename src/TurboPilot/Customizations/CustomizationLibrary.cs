@@ -15,6 +15,9 @@ public sealed class CustomizationLibrary
 	/// <summary>Prompt templates from prompts/*.md under each search root.</summary>
 	public Dictionary<string, CustomizationItem> Prompts { get; set; } = new(PathComparer);
 
+	/// <summary>Custom agent definitions from agents/*.md under each search root.</summary>
+	public Dictionary<string, CustomizationItem> Agents { get; set; } = new(PathComparer);
+
 	/// <summary>Skills from skills/[name]/SKILL.md under each search root.</summary>
 	public Dictionary<string, CustomizationItem> Skills { get; set; } = new(PathComparer);
 

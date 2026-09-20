@@ -1,11 +1,11 @@
 namespace TurboPilot.Customizations;
 
 /// <summary>
-/// A single customization item (prompt, skill or instruction) discovered
-/// on disk. <see cref="Name"/> is a unique short name assigned at scan
-/// time: when two items share a name the later one gets an incrementing
-/// suffix (doublecheck, doublecheck_2, ...) so both remain addressable.
-/// GitHub Copilot custom agent definitions are deliberately not collected.
+/// A single customization item (prompt, skill, instruction or custom
+/// agent) discovered on disk. <see cref="Name"/> is a unique short name
+/// assigned at scan time: when two items share a name the later one gets
+/// an incrementing suffix (doublecheck, doublecheck_2, ...) so both
+/// remain addressable.
 /// </summary>
 public sealed class CustomizationItem
 {
@@ -17,8 +17,8 @@ public sealed class CustomizationItem
 	public required string FilePath { get; init; }
 
 	/// <summary>
-	/// Unique short name: the file stem for prompts and instructions,
-	/// the skill folder name for skills.
+	/// Unique short name: the skill folder name for skills, the file stem
+	/// for prompts, instructions and agents.
 	/// </summary>
 	public required string Name { get; set; }
 

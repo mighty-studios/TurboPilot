@@ -68,6 +68,12 @@
 							SelectionChanged="OnFoundItemSelected"
 							CheckBox.Checked="OnItemToggled" CheckBox.Unchecked="OnItemToggled"/>
                 </TabItem>
+                <TabItem x:Name="tabAgents" Header="Agents">
+                    <ListBox x:Name="listAgents"
+							ItemTemplate="{StaticResource FoundItemTemplate}"
+							SelectionChanged="OnFoundItemSelected"
+							CheckBox.Checked="OnItemToggled" CheckBox.Unchecked="OnItemToggled"/>
+                </TabItem>
                 <TabItem x:Name="tabSkills" Header="Skills">
                     <ListBox x:Name="listSkills"
 							ItemTemplate="{StaticResource FoundItemTemplate}"
@@ -84,7 +90,7 @@
             <StackPanel Grid.Column="1" Margin="5,0,0,0">
                 <Label Content="Item Details"/>
                 <TextBox x:Name="textBoxDetails" Height="213" TextWrapping="Wrap"
-						IsReadOnly="True" VerticalScrollBarVisibility="Auto"/>
+						IsReadOnly="True" VerticalScrollBarVisibility="Auto" MaxWidth="495" Width="495" HorizontalAlignment="Right"/>
             </StackPanel>
         </Grid>
 

@@ -5,10 +5,9 @@ using TurboPilot.Dialogs;
 namespace TurboPilot.Customizations;
 
 /// <summary>
-/// Collects prompts, skills and instructions from the customization search
-/// roots and keeps the resulting lists in memory and on disk. GitHub
-/// Copilot custom agent definitions (agents/) are deliberately not
-/// collected; this tool does not use them.
+/// Collects prompts, custom agents, skills and instructions from the
+/// customization search roots and keeps the resulting lists in memory and
+/// on disk.
 ///
 /// Search order, following the GitHub Copilot convention plus our own:
 ///   1. The personal folder, %USERPROFILE%\.copilot
@@ -16,7 +15,8 @@ namespace TurboPilot.Customizations;
 ///   3. The workspace .github folder
 ///
 /// Within each root the standard layout is scanned:
-///   prompts/*.md, skills/[name]/SKILL.md and instructions/*.instructions.md
+///   prompts/*.md, agents/*.md, skills/[name]/SKILL.md and
+///   instructions/*.instructions.md
 /// (top-level files only; a skill is its whole folder, keyed by its SKILL.md).
 ///
 /// A rescan builds fresh lists but transfers the enabled flag from the
@@ -62,6 +62,7 @@ public static class CustomizationService
 		CustomizationLibrary library = Collect(workspaceFolder);
 
 		TransferEnabled(previous.Prompts, library.Prompts);
+		TransferEnabled(previous.Agents, library.Agents);
 		TransferEnabled(previous.Skills, library.Skills);
 		TransferEnabled(previous.Instructions, library.Instructions);
 
@@ -76,12 +77,14 @@ public static class CustomizationService
 	{
 		var library = new CustomizationLibrary();
 		var usedPromptNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var usedAgentNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		var usedSkillNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		var usedInstructionNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
 		foreach (string root in GetSearchRoots(workspaceFolder))
 		{
 			CollectPrompts(root, library, usedPromptNames);
+			CollectAgents(root, library, usedAgentNames);
 			CollectSkills(root, library, usedSkillNames);
 			CollectInstructions(root, library, usedInstructionNames);
 		}
@@ -123,6 +126,15 @@ public static class CustomizationService
 		{
 			string name = MakeUniqueName(Path.GetFileNameWithoutExtension(file), usedNames);
 			library.Prompts[file] = new CustomizationItem { FilePath = file, Name = name };
+		}
+	}
+
+	private static void CollectAgents(string root, CustomizationLibrary library, HashSet<string> usedNames)
+	{
+		foreach (string file in EnumerateFiles(Path.Combine(root, "agents"), "*.md"))
+		{
+			string name = MakeUniqueName(Path.GetFileNameWithoutExtension(file), usedNames);
+			library.Agents[file] = new CustomizationItem { FilePath = file, Name = name };
 		}
 	}
 
@@ -247,6 +259,7 @@ public static class CustomizationService
 	private static CustomizationLibrary RebuildKeys(CustomizationLibrary library)
 	{
 		library.Prompts = new(library.Prompts ?? new(), CustomizationLibrary.PathComparer);
+		library.Agents = new(library.Agents ?? new(), CustomizationLibrary.PathComparer);
 		library.Skills = new(library.Skills ?? new(), CustomizationLibrary.PathComparer);
 		library.Instructions = new(library.Instructions ?? new(), CustomizationLibrary.PathComparer);
 		return library;
