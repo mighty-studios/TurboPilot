@@ -69,6 +69,13 @@ public partial class MainWindow : TurbolandWindow
 	public bool IsSessionActive { get; private set; }
 
 	/// <summary>
+	/// The workspace folder of the active session, or null when none is
+	/// running. Scopes the settings that belong to a workspace, such as
+	/// its file access permissions.
+	/// </summary>
+	public string? ActiveWorkspacePath { get; private set; }
+
+	/// <summary>
 	/// Bulk-enables or disables every control that requires an active
 	/// session. The Session and Help menus, the output tabs and the
 	/// splitter stay available in both states: the user must always be
@@ -81,6 +88,8 @@ public partial class MainWindow : TurbolandWindow
 	public void SetSessionActive(bool active)
 	{
 		IsSessionActive = active;
+		if (!active)
+			ActiveWorkspacePath = null;
 
 		menuTools.IsEnabled = active;
 
@@ -592,6 +601,7 @@ public partial class MainWindow : TurbolandWindow
 		// the customization lists for the new workspace and report it in
 		// the status bar.
 		SetSessionActive(true);
+		ActiveWorkspacePath = dialog.WorkspacePath;
 		Customizations.CustomizationService.Rescan(dialog.WorkspacePath);
 		statusTextBlock.Text = $"Session started in: {dialog.WorkspacePath}";
 	}
@@ -605,5 +615,19 @@ public partial class MainWindow : TurbolandWindow
 	private void OnCustomization(object sender, RoutedEventArgs e)
 	{
 		new Dialogs.CustomizeDialog().ShowDialog(this);
+	}
+
+	// ── Permissions ──────────────────────────────────────────────────────────
+
+	/// <summary>
+	/// Opens the Permissions dialog. It edits the file access entries that
+	/// belong to the active workspace, or the application defaults when no
+	/// session is running. Modal and owned: the OS keeps it above the main
+	/// window (and its WebView2 airspace), and the blocking call means it
+	/// cannot stack a duplicate.
+	/// </summary>
+	private void OnPermissions(object sender, RoutedEventArgs e)
+	{
+		new Dialogs.PermissionsDialog(ActiveWorkspacePath).ShowDialog(this);
 	}
 }

@@ -1,0 +1,153 @@
+<ctl:TurbolandFloatingDialog
+	xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+	xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+	xmlns:ctl="clr-namespace:TurbolandTheme.Wpf.Controls;assembly=TurbolandTheme.Wpf"
+	xmlns:perm="clr-namespace:TurboPilot.Permissions"
+	xmlns:av="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="av"
+	x:Class="TurboPilot.Dialogs.PermissionsDialog"
+	Title="Permissions" Width="720" Height="606">
+
+	<ctl:TurbolandFloatingDialog.Resources>
+		<!-- One folder grant: the path pattern on the left, its access level
+		on the right. Amber ink and a tooltip warn when the folder the
+		pattern is anchored to is not on disk. -->
+		<DataTemplate x:Key="PermissionRowTemplate">
+			<Grid>
+				<Grid.ColumnDefinitions>
+					<ColumnDefinition Width="*"/>
+					<ColumnDefinition Width="Auto"/>
+				</Grid.ColumnDefinitions>
+				<TextBlock Grid.Column="0" Text="{Binding FolderPath}" Margin="0,0,8,0"
+						VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
+					<TextBlock.Style>
+						<Style TargetType="TextBlock">
+							<Style.Triggers>
+								<DataTrigger Binding="{Binding Exists}" Value="False">
+									<Setter Property="Foreground" Value="#D2A032"/>
+									<Setter Property="ToolTip" Value="No folder on disk matches this path."/>
+								</DataTrigger>
+							</Style.Triggers>
+						</Style>
+					</TextBlock.Style>
+				</TextBlock>
+				<ComboBox Grid.Column="1" Width="112" VerticalAlignment="Center"
+						ItemsSource="{x:Static perm:PermissionOptions.All}"
+						DisplayMemberPath="Label" SelectedValuePath="Access"
+						SelectedValue="{Binding Access, Mode=TwoWay}"
+						SelectionChanged="OnAccessChanged"
+						ToolTip="Access granted at this path"/>
+			</Grid>
+		</DataTemplate>
+	</ctl:TurbolandFloatingDialog.Resources>
+
+	<!-- Permissions for one scope: the active workspace when a session is
+	running, the application defaults when none is. Folder grants add to the
+	application defaults; the operation toggles are inherited from them until
+	the workspace sets its own. The floating dialog sizes to its content,
+	which overrides Width and Height at runtime; the designer's Width/Height
+	are captured as MinWidth/MinHeight in OnInitialized, so they act as the
+	minimum dialog size. -->
+	<StackPanel Margin="10,0,10,0">
+		<Label x:Name="labelScope" Content="Application defaults (no active session)"/>
+
+		<!-- Folder grants. -->
+		<GroupBox Header="Folders outside the workspace that may be read or written"
+				Margin="0,4,0,0">
+			<StackPanel>
+				<Grid>
+					<Grid.ColumnDefinitions>
+						<ColumnDefinition Width="*"/>
+						<ColumnDefinition Width="Auto"/>
+					</Grid.ColumnDefinitions>
+
+					<ListBox x:Name="listBoxEntries" Grid.Column="0" Height="132"
+							HorizontalContentAlignment="Stretch"
+							SelectionMode="Single"
+							SelectionChanged="OnListSelectionChanged"
+							ItemTemplate="{StaticResource PermissionRowTemplate}"
+							Margin="{DynamicResource Turboland.Size.ColumnGutter}"/>
+
+					<StackPanel Grid.Column="1" Width="96">
+						<Button x:Name="buttonAdd" Content="Add" Click="OnAdd"
+								Margin="0,0,0,6"/>
+						<Button x:Name="buttonRemove" Content="Remove" Click="OnRemove"/>
+					</StackPanel>
+				</Grid>
+
+				<!-- New grant: a typed path (so wildcards and an ellipsis can
+				be used), the access level to grant, and the folder picker
+				that fills the path in. -->
+				<Grid Margin="0,8,0,0">
+					<Grid.ColumnDefinitions>
+						<ColumnDefinition Width="*"/>
+						<ColumnDefinition Width="Auto"/>
+						<ColumnDefinition Width="Auto"/>
+					</Grid.ColumnDefinitions>
+
+					<TextBox x:Name="textBoxFolder" Grid.Column="0"
+							VerticalAlignment="Center"
+							KeyDown="OnFolderKeyDown"
+							ToolTip="Folder path. * and ? wildcards, and ... for subfolders."/>
+					<ComboBox x:Name="comboAccess" Grid.Column="1" Width="112" Margin="8,0,0,0"
+							VerticalAlignment="Center"
+							ItemsSource="{x:Static perm:PermissionOptions.All}"
+							DisplayMemberPath="Label" SelectedValuePath="Access"
+							ToolTip="Access to grant to the folder being added"/>
+					<Button x:Name="buttonBrowse" Grid.Column="2" Content="Browse..."
+							Margin="8,0,0,0" Click="OnBrowse"/>
+				</Grid>
+
+				<Label Margin="0,6,0,0" Content="End a path with \... to include every subfolder. * and ? match within one folder name."/>
+			</StackPanel>
+		</GroupBox>
+
+		<!-- Operation toggles. The check boxes are built in code from the
+		operation list, two columns deep. -->
+		<GroupBox Header="Operations allowed without asking" Margin="0,12,0,0">
+			<Grid>
+				<Grid.ColumnDefinitions>
+					<ColumnDefinition Width="*"/>
+					<ColumnDefinition Width="*"/>
+				</Grid.ColumnDefinitions>
+				<StackPanel x:Name="panelOperationsLeft" Grid.Column="0"/>
+				<StackPanel x:Name="panelOperationsRight" Grid.Column="1"/>
+			</Grid>
+		</GroupBox>
+
+		<Grid Margin="0,6,0,0">
+			<Grid.ColumnDefinitions>
+				<ColumnDefinition Width="*"/>
+				<ColumnDefinition Width="Auto"/>
+			</Grid.ColumnDefinitions>
+			<TextBlock x:Name="textOperationSource" TextWrapping="Wrap"
+					VerticalAlignment="Center" Margin="0,0,12,0"/>
+			<Button x:Name="buttonUseDefaults" Grid.Column="1" Content="Use Defaults"
+					Width="110" Click="OnUseDefaults"
+					ToolTip="Discard this workspace's own toggles and inherit the application defaults again"/>
+		</Grid>
+
+		<Grid Margin="0,12,0,0">
+			<Grid.ColumnDefinitions>
+				<ColumnDefinition Width="*"/>
+				<ColumnDefinition Width="Auto"/>
+			</Grid.ColumnDefinitions>
+
+			<!-- Save/Load carry the scope's settings, not the scope itself:
+			the same option set can be loaded into any workspace. -->
+			<StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+				<Button x:Name="buttonSaveOptions" Content="Save Options..." Width="110"
+						Click="OnSaveOptions" Margin="0,0,12,0"/>
+				<Button x:Name="buttonLoadOptions" Content="Load Options..." Width="110"
+						Click="OnLoadOptions"/>
+			</StackPanel>
+
+			<!-- ButtonStripMargin keeps each button's hard shadow off its
+			neighbor; the rightmost button needs none. -->
+			<StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,18,0,0">
+				<Button x:Name="buttonCancel" Content="Cancel" IsCancel="True" Click="OnCancel" Margin="0,0,12,0"/>
+				<Button x:Name="buttonOK" Content="OK" IsDefault="True" Click="OnOk"
+						Margin="{DynamicResource Turboland.Size.ButtonStripMargin}"/>
+			</StackPanel>
+		</Grid>
+	</StackPanel>
+</ctl:TurbolandFloatingDialog>
