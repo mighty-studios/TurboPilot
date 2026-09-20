@@ -38,10 +38,12 @@
             <!-- Buttons on the right side of the toolbar -->
             <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,5,0">
                 <!-- Session-dependent controls: enabled and disabled in bulk
-                     by SetSessionActive, not here. -->
-                <Button x:Name="buttonAttachments" Content="+0" Width="40" Height="25" Margin="0,0,5,0" Background="#565656" Foreground="White" BorderBrush="Gray" Click="ButtonAttachments_Click"/>
-                <Button x:Name="buttonStop" Content="Stop" Width="60" Height="25" Margin="0,0,5,0" Background="#565656" Foreground="White" BorderBrush="Gray"/>
-                <Button x:Name="buttonSend" Content="Send" Width="80" Height="25" Background="#3C70A0" Foreground="White" BorderBrush="Gray"/>
+                     by SetSessionActive, not here. No explicit colors: local
+                     values would outrank the theme's disabled-state triggers
+                     and leave a disabled button painted in its enabled ink. -->
+                <Button x:Name="buttonAttachments" Content="+0" Width="40" Height="25" Margin="0,0,5,0" Click="ButtonAttachments_Click"/>
+                <Button x:Name="buttonStop" Content="Stop" Width="60" Height="25" Margin="0,0,5,0"/>
+                <Button x:Name="buttonSend" Content="Send" Width="80" Height="25"/>
             </StackPanel>
         </StatusBar>
 

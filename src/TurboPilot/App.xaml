@@ -4,4 +4,16 @@
 	<!-- No StartupUri: the theme must be applied before the first window is
 	     constructed, because TurbolandWindow resolves its style from application
 	     resources at construction time. App.OnStartup does both, in that order. -->
+	<Application.Resources>
+		<!-- TurboPilot deviation from Authentic mode: a disabled push button
+		     greys out instead of keeping the green face. Authentic mode dims
+		     only the label, which leaves a disabled button looking active at a
+		     glance; this app needs unavailable controls to be obvious at a
+		     glance because most of them gate on session state. Light gray is
+		     the palette entry Accessible mode uses for the same purpose.
+		     A direct entry in Application.Resources wins over the theme's
+		     merged dictionaries, so this overrides the token app-wide. -->
+		<SolidColorBrush x:Key="Turboland.Brush.ButtonDisabledFace"
+						 Color="{DynamicResource Turboland.Color.Palette.7}" />
+	</Application.Resources>
 </Application>
