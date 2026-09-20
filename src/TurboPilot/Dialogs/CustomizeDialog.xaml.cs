@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
+using TurboPilot.Customizations;
 using TurbolandTheme.Wpf.Controls;
 
 namespace TurboPilot.Dialogs;
@@ -35,6 +36,7 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 
 		ReloadList();
 		UpdateButtonStates();
+		RefreshFoundItems();
 	}
 
 	protected override void OnInitialized(EventArgs e)
@@ -153,6 +155,36 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 	private bool IsDuplicate(string candidate) =>
 		_folders.Any(f => string.Equals(f, candidate, StringComparison.OrdinalIgnoreCase));
 
+	// ------------------------------------------------------------------ found items
+
+	/// <summary>
+	/// Shows the collected customization items grouped by type. Disabled
+	/// entries are tagged so the state is visible without a checkbox column.
+	/// </summary>
+	private void RefreshFoundItems()
+	{
+		var library = CustomizationService.Current;
+		treeView.Items.Clear();
+		AddFoundGroup("Prompts", library.Prompts);
+		AddFoundGroup("Skills", library.Skills);
+		AddFoundGroup("Instructions", library.Instructions);
+	}
+
+	private void AddFoundGroup(string header, IReadOnlyDictionary<string, CustomizationItem> items)
+	{
+		var group = new TreeViewItem { Header = $"{header} ({items.Count})" };
+		foreach (var item in items.Values.OrderBy(i => i.Name, StringComparer.OrdinalIgnoreCase))
+		{
+			group.Items.Add(new TreeViewItem
+			{
+				Header = item.Enabled ? item.Name : $"{item.Name} [off]",
+				ToolTip = item.FilePath,
+			});
+		}
+		treeView.Items.Add(group);
+		group.IsExpanded = true;
+	}
+
 	// ------------------------------------------------------------------ results
 
 	private void OnOk(object sender, RoutedEventArgs e)
@@ -160,6 +192,10 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 		var settings = Settings.Load();
 		settings.CustomizationFolders = new List<string>(_folders);
 		settings.Save();
+
+		// The search roots changed: rebuild the customization lists so the
+		// next session (and the Items Found tree) sees the new folders.
+		CustomizationService.Rescan(settings.LastWorkspacePath);
 
 		Close(true);
 	}

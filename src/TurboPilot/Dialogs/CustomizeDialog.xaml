@@ -11,9 +11,9 @@
 	later entries override earlier ones. The floating dialog sizes to its
 	content, which overrides Width and Height at runtime; the designer's
 	Width/Height are captured as MinWidth/MinHeight in OnInitialized, so
-	they act as the minimum dialog size. The found-items tree, details
-	pane, filter and Add To Prompt are placeholders until the folder scan
-	is implemented. -->
+	they act as the minimum dialog size. The found-items tree shows the
+	collected customization items; the details pane, filter and Add To
+	Prompt are placeholders until item management. -->
     <StackPanel Margin="10,0,10,0">
         <Label Content="Search Paths For Agents, Skills and Instructions:"/>
 
@@ -40,7 +40,8 @@
             </StackPanel>
         </Grid>
 
-        <!-- Placeholders: populated once the search paths are scanned. -->
+        <!-- Items collected from the search roots. The details pane and
+        enable/disable editing are placeholders until item management. -->
         <Grid Margin="0,12,0,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="250"/>
@@ -48,7 +49,7 @@
             </Grid.ColumnDefinitions>
             <StackPanel Grid.Column="0" Margin="{DynamicResource Turboland.Size.ColumnGutter}">
                 <Label Content="Items Found"/>
-                <TreeView x:Name="treeView" Height="160" IsEnabled="False"/>
+                <TreeView x:Name="treeView" Height="160"/>
             </StackPanel>
             <StackPanel Grid.Column="1">
                 <Label Content="Item Details"/>

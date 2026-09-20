@@ -588,9 +588,11 @@ public partial class MainWindow : TurbolandWindow
 			return;
 
 		// TODO: Start the AI session with the selected workspace folder
-		// For now, bring the session-dependent controls online and
-		// report the workspace in the status bar.
+		// For now, bring the session-dependent controls online, refresh
+		// the customization lists for the new workspace and report it in
+		// the status bar.
 		SetSessionActive(true);
+		Customizations.CustomizationService.Rescan(dialog.WorkspacePath);
 		statusTextBlock.Text = $"Session started in: {dialog.WorkspacePath}";
 	}
 
