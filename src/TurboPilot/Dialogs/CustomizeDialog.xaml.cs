@@ -169,6 +169,7 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 		PopulateTab(listPrompts, tabPrompts, "Prompts", library.Prompts, onlyEnabled);
 		PopulateTab(listSkills, tabSkills, "Skills", library.Skills, onlyEnabled);
 		PopulateTab(listInstructions, tabInstructions, "Instructions", library.Instructions, onlyEnabled);
+		textBoxDetails.Text = string.Empty;
 	}
 
 	private static void PopulateTab(ListBox list, TabItem tab, string label,
@@ -197,9 +198,53 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 		// update order relative to this event.
 		item.Enabled = checkBox.IsChecked == true;
 		CustomizationService.Save(CustomizationService.Current);
+
+		// Keep the details pane honest if the toggled item is selected.
+		if (listPrompts.SelectedItem == item || listSkills.SelectedItem == item
+			|| listInstructions.SelectedItem == item)
+		{
+			ShowDetails(item);
+		}
 	}
 
 	private void OnOnlyEnabledChanged(object sender, RoutedEventArgs e) => RefreshFoundItems();
+
+	/// <summary>
+	/// A row in one of the found-items lists was selected: show its
+	/// details. Selection never changes the enabled flag; only the
+	/// checkmark does, through OnItemToggled.
+	/// </summary>
+	private void OnFoundItemSelected(object sender, SelectionChangedEventArgs e)
+	{
+		if (sender is not ListBox list)
+			return;
+
+		if (list.SelectedItem is not CustomizationItem item)
+		{
+			textBoxDetails.Text = string.Empty;
+			return;
+		}
+
+		ShowDetails(item);
+	}
+
+	private void ShowDetails(CustomizationItem item)
+	{
+		textBoxDetails.Text = string.Join(Environment.NewLine,
+			$"Type: {TypeNameFor(item)}",
+			$"Name: {item.Name}",
+			$"Path: {item.FilePath}",
+			$"State: {(item.Enabled ? "Enabled" : "Disabled")}");
+	}
+
+	private string TypeNameFor(CustomizationItem item)
+	{
+		var library = CustomizationService.Current;
+		if (library.Prompts.ContainsKey(item.FilePath)) return "Prompt";
+		if (library.Skills.ContainsKey(item.FilePath)) return "Skill";
+		if (library.Instructions.ContainsKey(item.FilePath)) return "Instruction";
+		return "Item";
+	}
 
 	// ------------------------------------------------------------------ results
 

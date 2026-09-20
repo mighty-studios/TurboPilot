@@ -4,15 +4,19 @@
 	xmlns:ctl="clr-namespace:TurbolandTheme.Wpf.Controls;assembly=TurbolandTheme.Wpf"
 	xmlns:av="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="av"
 	x:Class="TurboPilot.Dialogs.CustomizeDialog"
-	Title="Customization" Width="770" Height="431">
+	Title="Customization" Width="960" Height="493">
 
-	<ctl:TurbolandFloatingDialog.Resources>
-		<!-- One row of a found-items list: the checkbox toggles the item's
-		enabled flag in place; the TwoWay binding writes it back. -->
-		<DataTemplate x:Key="FoundItemTemplate">
-			<CheckBox Content="{Binding Name}" IsChecked="{Binding Enabled, Mode=TwoWay}"/>
-		</DataTemplate>
-	</ctl:TurbolandFloatingDialog.Resources>
+    <ctl:TurbolandFloatingDialog.Resources>
+        <!-- One row of a found-items list: the checkmark is the only hit
+        target for toggling, so the name sits in its own TextBlock and a
+        click there just selects the row for the details pane. -->
+        <DataTemplate x:Key="FoundItemTemplate">
+            <StackPanel Orientation="Horizontal">
+            	<CheckBox IsChecked="{Binding Enabled, Mode=TwoWay}" VerticalAlignment="Center"/>
+            	<TextBlock Text="{Binding Name}" Margin="6,0,0,0" VerticalAlignment="Center"/>
+            </StackPanel>
+        </DataTemplate>
+    </ctl:TurbolandFloatingDialog.Resources>
 
     <!-- Edit the ordered list of folders the application searches for
 	customization items (agents, skills and instructions). Order matters:
@@ -20,8 +24,8 @@
 	content, which overrides Width and Height at runtime; the designer's
 	Width/Height are captured as MinWidth/MinHeight in OnInitialized, so
 	they act as the minimum dialog size. The found-items tabs list the
-	collected customization items with enable checkboxes; the details
-	pane and Add To Prompt are placeholders until item management. -->
+	collected customization items with enable checkboxes and a details
+	pane; Add To Prompt is a placeholder until item management. -->
     <StackPanel Margin="10,0,10,0">
         <Label Content="Search Paths For Agents, Skills and Instructions:"/>
 
@@ -49,35 +53,38 @@
         </Grid>
 
         <!-- Items collected from the search roots, one tab per type. The
-        checkbox prefix toggles whether the item participates. The details
-        pane and Add To Prompt are placeholders until item management. -->
-        <Grid Margin="0,12,0,0">
+        checkmark toggles participation; selecting a row shows its details.
+        Add To Prompt is a placeholder until item management. -->
+        <Grid Margin="0,12,0,0" Height="250">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="250"/>
-                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="440"/>
+                <ColumnDefinition/>
             </Grid.ColumnDefinitions>
-            <TabControl x:Name="tabsFound" Grid.Column="0" Height="180"
-					Margin="{DynamicResource Turboland.Size.ColumnGutter}">
+            <TabControl x:Name="tabsFound" Grid.Column="0"
+					Margin="0,10,0,10">
                 <TabItem x:Name="tabPrompts" Header="Prompts">
                     <ListBox x:Name="listPrompts"
 							ItemTemplate="{StaticResource FoundItemTemplate}"
+							SelectionChanged="OnFoundItemSelected"
 							CheckBox.Checked="OnItemToggled" CheckBox.Unchecked="OnItemToggled"/>
                 </TabItem>
                 <TabItem x:Name="tabSkills" Header="Skills">
                     <ListBox x:Name="listSkills"
 							ItemTemplate="{StaticResource FoundItemTemplate}"
+							SelectionChanged="OnFoundItemSelected"
 							CheckBox.Checked="OnItemToggled" CheckBox.Unchecked="OnItemToggled"/>
                 </TabItem>
                 <TabItem x:Name="tabInstructions" Header="Instructions">
                     <ListBox x:Name="listInstructions"
 							ItemTemplate="{StaticResource FoundItemTemplate}"
+							SelectionChanged="OnFoundItemSelected"
 							CheckBox.Checked="OnItemToggled" CheckBox.Unchecked="OnItemToggled"/>
                 </TabItem>
             </TabControl>
-            <StackPanel Grid.Column="1">
+            <StackPanel Grid.Column="1" Margin="5,0,0,0">
                 <Label Content="Item Details"/>
-                <TextBox x:Name="textBoxDetails" Height="160" TextWrapping="Wrap"
-						IsEnabled="False" VerticalScrollBarVisibility="Auto"/>
+                <TextBox x:Name="textBoxDetails" Height="213" TextWrapping="Wrap"
+						IsReadOnly="True" VerticalScrollBarVisibility="Auto"/>
             </StackPanel>
         </Grid>
 
