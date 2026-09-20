@@ -108,6 +108,14 @@
                 		Click="OnOnlyEnabledClick"
                 		Checked="OnOnlyEnabledChanged" Unchecked="OnOnlyEnabledChanged"/>
                 <Button x:Name="buttonAddToPrompt" Content="Add To Prompt" Width="149" IsEnabled="False" HorizontalAlignment="Left" Margin="0,6,0,0"/>
+                <!-- Save/Load carry only the item enabled options, not the
+                folder list: those are application-level globals. -->
+                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                    <Button x:Name="buttonSaveOptions" Content="Save Options..." Width="110"
+							Click="OnSaveOptions" Margin="0,0,12,0"/>
+                    <Button x:Name="buttonLoadOptions" Content="Load Options..." Width="110"
+							Click="OnLoadOptions"/>
+                </StackPanel>
             </StackPanel>
             <!-- ButtonStripMargin keeps each button's hard shadow off its
 			neighbor; the rightmost button needs none. -->

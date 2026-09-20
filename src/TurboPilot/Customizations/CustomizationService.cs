@@ -60,8 +60,25 @@ public static class CustomizationService
 	/// </param>
 	public static CustomizationLibrary Rescan(string? workspaceFolder)
 	{
-		CustomizationLibrary previous = Current;
-		CustomizationLibrary library = Collect(workspaceFolder);
+		CustomizationLibrary library = Preview(
+			workspaceFolder, Settings.Load().CustomizationFolders, Current);
+
+		Save(library);
+		Current = library;
+		return library;
+	}
+
+	/// <summary>
+	/// Builds a library from the given folder list (plus the personal and
+	/// workspace roots) and transfers enabled flags from
+	/// <paramref name="previous"/> by key, without touching the live lists
+	/// or disk. Used by the Customization dialog to refresh its working
+	/// copy after staged folder changes or an options load.
+	/// </summary>
+	public static CustomizationLibrary Preview(string? workspaceFolder,
+		IReadOnlyList<string> folders, CustomizationLibrary previous)
+	{
+		CustomizationLibrary library = Collect(GetSearchRoots(workspaceFolder, folders));
 
 		TransferEnabled(previous.Prompts, library.Prompts);
 		TransferEnabled(previous.Agents, library.Agents);
@@ -69,8 +86,6 @@ public static class CustomizationService
 		TransferEnabled(previous.Instructions, library.Instructions);
 		TransferEnabled(previous.McpServers, library.McpServers);
 
-		Save(library);
-		Current = library;
 		return library;
 	}
 
@@ -87,7 +102,7 @@ public static class CustomizationService
 
 	// ------------------------------------------------------------------ scan
 
-	private static CustomizationLibrary Collect(string? workspaceFolder)
+	private static CustomizationLibrary Collect(IEnumerable<string> roots)
 	{
 		var library = new CustomizationLibrary();
 		var usedPromptNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -96,7 +111,7 @@ public static class CustomizationService
 		var usedInstructionNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		var usedMcpNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-		foreach (string root in GetSearchRoots(workspaceFolder))
+		foreach (string root in roots)
 		{
 			CollectPrompts(root, library, usedPromptNames);
 			CollectAgents(root, library, usedAgentNames);
@@ -108,7 +123,12 @@ public static class CustomizationService
 		return library;
 	}
 
-	private static IEnumerable<string> GetSearchRoots(string? workspaceFolder)
+	/// <summary>
+	/// The roots a scan covers: the personal folder, the given
+	/// customization folders, then the workspace .github folder.
+	/// </summary>
+	public static IEnumerable<string> GetSearchRoots(string? workspaceFolder,
+		IReadOnlyList<string> folders)
 	{
 		var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -118,7 +138,7 @@ public static class CustomizationService
 		if (AddRoot(seen, personal))
 			yield return personal;
 
-		foreach (string folder in Settings.Load().CustomizationFolders)
+		foreach (string folder in folders)
 		{
 			string trimmed = folder.Trim();
 			if (AddRoot(seen, trimmed))
@@ -293,6 +313,61 @@ public static class CustomizationService
 		{
 			return new CustomizationLibrary();
 		}
+	}
+
+	/// <summary>
+	/// Writes a library to an arbitrary file, for the dialog's Save
+	/// Options. Throws to the caller so it can report the failure.
+	/// </summary>
+	public static void SaveTo(CustomizationLibrary library, string filePath) =>
+		File.WriteAllText(filePath, JsonSerializer.Serialize(library, SerializerOptions));
+
+	/// <summary>
+	/// Reads a library saved by <see cref="SaveTo"/>. Throws to the caller
+	/// so it can report the failure.
+	/// </summary>
+	public static CustomizationLibrary LoadFrom(string filePath)
+	{
+		var library = JsonSerializer.Deserialize<CustomizationLibrary>(
+			File.ReadAllText(filePath), SerializerOptions);
+		return RebuildKeys(library ?? new CustomizationLibrary());
+	}
+
+	/// <summary>
+	/// Derives the search root an item path came from, following the
+	/// scanned layout (root/prompts, root/agents, root/instructions,
+	/// root/skills/[name]/SKILL.md, root/*.mcp.json). Returns null when
+	/// the path does not fit the layout.
+	/// </summary>
+	public static string? RootFolderFor(string itemPath)
+	{
+		string? directory = Path.GetDirectoryName(itemPath);
+		if (directory is null)
+			return null;
+
+		string fileName = Path.GetFileName(itemPath);
+
+		if (fileName.Equals("SKILL.md", StringComparison.OrdinalIgnoreCase))
+		{
+			// root/skills/[name]/SKILL.md
+			string? skills = Path.GetDirectoryName(directory);
+			string? root = Path.GetDirectoryName(skills);
+			return skills is not null
+				&& Path.GetFileName(skills).Equals("skills", StringComparison.OrdinalIgnoreCase)
+				? root
+				: null;
+		}
+
+		string parentName = Path.GetFileName(directory);
+		if (parentName.Equals("prompts", StringComparison.OrdinalIgnoreCase)
+			|| parentName.Equals("agents", StringComparison.OrdinalIgnoreCase)
+			|| parentName.Equals("instructions", StringComparison.OrdinalIgnoreCase))
+			return Path.GetDirectoryName(directory);
+
+		if (fileName.EndsWith(".mcp.json", StringComparison.OrdinalIgnoreCase))
+			return directory;
+
+		return null;
 	}
 
 	// Deserialized dictionaries get the default ordinal comparer; rebuild

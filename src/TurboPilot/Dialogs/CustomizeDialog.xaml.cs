@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
@@ -22,8 +23,9 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 	private readonly List<string> _folders;
 
 	// Deep copy of the collected library; the live lists stay untouched
-	// until Commit on OK.
-	private readonly CustomizationLibrary _library;
+	// until Commit on OK. Replaced (not mutated) when a load rebuilds it
+	// after staged folder additions.
+	private CustomizationLibrary _library;
 
 	/// <summary>
 	/// The edited list of search folders. Only meaningful after the dialog
@@ -347,6 +349,122 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 	}
 
 	private void OnCancel(object sender, RoutedEventArgs e) => Close(false);
+
+	// ------------------------------------------------------------------ options file
+
+	/// <summary>
+	/// Saves the staged item options (enabled flags) to a file the user
+	/// picks. The folder list is not written: those are application-level
+	/// globals.
+	/// </summary>
+	private void OnSaveOptions(object sender, RoutedEventArgs e)
+	{
+		var dialog = new Microsoft.Win32.SaveFileDialog
+		{
+			Title = "Save Customization Options",
+			Filter = "Customization options (*.json)|*.json|All files (*.*)|*.*",
+			DefaultExt = ".json",
+			FileName = "customization-options.json",
+		};
+
+		if (dialog.ShowDialog(this) != true)
+			return;
+
+		try
+		{
+			CustomizationService.SaveTo(_library, dialog.FileName);
+		}
+		catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+			or System.Security.SecurityException)
+		{
+			MessageBox.Show(this, $"Could not save the options file:\r\n{ex.Message}",
+				"Customization", MessageBoxButton.OK, MessageBoxImage.Warning);
+		}
+	}
+
+	private void OnLoadOptions(object sender, RoutedEventArgs e)
+	{
+		var dialog = new Microsoft.Win32.OpenFileDialog
+		{
+			Title = "Load Customization Options",
+			Filter = "Customization options (*.json)|*.json|All files (*.*)|*.*",
+			CheckFileExists = true,
+		};
+
+		if (dialog.ShowDialog(this) != true)
+			return;
+
+		CustomizationLibrary loaded;
+		try
+		{
+			loaded = CustomizationService.LoadFrom(dialog.FileName);
+		}
+		catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+			or System.Security.SecurityException or System.Text.Json.JsonException)
+		{
+			MessageBox.Show(this, $"Could not read the options file:\r\n{ex.Message}",
+				"Customization", MessageBoxButton.OK, MessageBoxImage.Warning);
+			return;
+		}
+
+		ApplyLoadedOptions(loaded);
+	}
+
+	/// <summary>
+	/// Folds a loaded options file into the staged state: folders the
+	/// loaded paths live in are added when missing (and exist on disk),
+	/// the staged library is rebuilt so those folders' items appear, and
+	/// finally the loaded enabled flags are transferred onto every item
+	/// matched by key.
+	/// </summary>
+	private void ApplyLoadedOptions(CustomizationLibrary loaded)
+	{
+		string? workspace = Settings.Load().LastWorkspacePath;
+		var roots = new HashSet<string>(
+			CustomizationService.GetSearchRoots(workspace, _folders), StringComparer.OrdinalIgnoreCase);
+
+		bool foldersAdded = false;
+		foreach (var item in LoadedItems(loaded))
+		{
+			string? root = CustomizationService.RootFolderFor(item.FilePath);
+			if (root is not null && Directory.Exists(root) && roots.Add(root))
+			{
+				_folders.Add(root);
+				foldersAdded = true;
+			}
+		}
+
+		if (foldersAdded)
+			ReloadList();
+
+		// Rebuild first so items from newly added folders exist, then let
+		// the loaded flags win over the staged ones for matching keys.
+		_library = CustomizationService.Preview(workspace, _folders, _library);
+		TransferEnabledInto(loaded.Prompts, _library.Prompts);
+		TransferEnabledInto(loaded.Agents, _library.Agents);
+		TransferEnabledInto(loaded.Skills, _library.Skills);
+		TransferEnabledInto(loaded.Instructions, _library.Instructions);
+		TransferEnabledInto(loaded.McpServers, _library.McpServers);
+		RefreshFoundItems();
+	}
+
+	private static IEnumerable<CustomizationItem> LoadedItems(CustomizationLibrary loaded) =>
+		loaded.Prompts.Values
+			.Concat(loaded.Agents.Values)
+			.Concat(loaded.Skills.Values)
+			.Concat(loaded.Instructions.Values)
+			.Concat(loaded.McpServers.Values);
+
+	private static void TransferEnabledInto(
+		Dictionary<string, CustomizationItem> loaded,
+		Dictionary<string, CustomizationItem> staged)
+	{
+		foreach (var (key, item) in loaded)
+		{
+			if (staged.TryGetValue(key, out var target))
+				target.Enabled = item.Enabled;
+		}
+	}
 
 	/// <summary>
 	/// Adapts a raw HWND to <see cref="System.Windows.Forms.IWin32Window"/> so the
