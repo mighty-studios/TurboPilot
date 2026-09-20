@@ -158,32 +158,48 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 	// ------------------------------------------------------------------ found items
 
 	/// <summary>
-	/// Shows the collected customization items grouped by type. Disabled
-	/// entries are tagged so the state is visible without a checkbox column.
+	/// Fills the per-type tabs from the collected library. With the
+	/// Only Show Enabled filter on, disabled items are left out of the
+	/// lists; the tab headers always report the full counts.
 	/// </summary>
 	private void RefreshFoundItems()
 	{
 		var library = CustomizationService.Current;
-		treeView.Items.Clear();
-		AddFoundGroup("Prompts", library.Prompts);
-		AddFoundGroup("Skills", library.Skills);
-		AddFoundGroup("Instructions", library.Instructions);
+		bool onlyEnabled = radioOnlyEnabled.IsChecked == true;
+		PopulateTab(listPrompts, tabPrompts, "Prompts", library.Prompts, onlyEnabled);
+		PopulateTab(listSkills, tabSkills, "Skills", library.Skills, onlyEnabled);
+		PopulateTab(listInstructions, tabInstructions, "Instructions", library.Instructions, onlyEnabled);
 	}
 
-	private void AddFoundGroup(string header, IReadOnlyDictionary<string, CustomizationItem> items)
+	private static void PopulateTab(ListBox list, TabItem tab, string label,
+		IReadOnlyDictionary<string, CustomizationItem> items, bool onlyEnabled)
 	{
-		var group = new TreeViewItem { Header = $"{header} ({items.Count})" };
-		foreach (var item in items.Values.OrderBy(i => i.Name, StringComparer.OrdinalIgnoreCase))
-		{
-			group.Items.Add(new TreeViewItem
-			{
-				Header = item.Enabled ? item.Name : $"{item.Name} [off]",
-				ToolTip = item.FilePath,
-			});
-		}
-		treeView.Items.Add(group);
-		group.IsExpanded = true;
+		list.ItemsSource = items.Values
+			.Where(i => !onlyEnabled || i.Enabled)
+			.OrderBy(i => i.Name, StringComparer.OrdinalIgnoreCase)
+			.ToList();
+		tab.Header = $"{label} ({items.Count})";
 	}
+
+	/// <summary>
+	/// A checkbox in one of the found-items lists was toggled. The TwoWay
+	/// binding already wrote the flag back to the item; persist so the
+	/// choice survives the session. The lists are deliberately not rebuilt
+	/// here: the row the user just clicked must not vanish under the filter.
+	/// </summary>
+	private void OnItemToggled(object sender, RoutedEventArgs e)
+	{
+		if (e.OriginalSource is not CheckBox checkBox
+			|| checkBox.DataContext is not CustomizationItem item)
+			return;
+
+		// Write the flag explicitly rather than trusting the binding's
+		// update order relative to this event.
+		item.Enabled = checkBox.IsChecked == true;
+		CustomizationService.Save(CustomizationService.Current);
+	}
+
+	private void OnOnlyEnabledChanged(object sender, RoutedEventArgs e) => RefreshFoundItems();
 
 	// ------------------------------------------------------------------ results
 
