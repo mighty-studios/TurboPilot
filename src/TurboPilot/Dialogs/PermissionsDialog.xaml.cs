@@ -49,6 +49,11 @@ public partial class PermissionsDialog : TurbolandFloatingDialog
 	private bool _dirty;
 	private bool _loading;
 
+	// True while the discard confirmation is on screen. The modal box
+	// blocks mouse input, but a programmatic close attempt (or a stray
+	// accelerator) must not call Close again mid-close.
+	private bool _confirming;
+
 	public PermissionsDialog()
 		: this(null)
 	{
@@ -316,6 +321,9 @@ public partial class PermissionsDialog : TurbolandFloatingDialog
 
 	private void OnOk(object sender, RoutedEventArgs e)
 	{
+		// The writes below are the save; the close guard must not ask twice.
+		_dirty = false;
+
 		PermissionService.SetEntries(_workspace,
 			_rows.Select(r => new PermissionEntry(r.FolderPath, r.Access)));
 
@@ -335,15 +343,39 @@ public partial class PermissionsDialog : TurbolandFloatingDialog
 
 	private void OnCancel(object sender, RoutedEventArgs e)
 	{
-		if (_dirty)
-		{
-			var answer = MessageBox.Show(this, "You have unsaved changes. Discard them?",
-				"Permissions", MessageBoxButton.YesNo, MessageBoxImage.Question);
-			if (answer != MessageBoxResult.Yes)
-				return;
-		}
+		if (_confirming)
+			return;
 
 		Close(false);
+	}
+
+	/// <summary>
+	/// Guards every close path (Cancel, the close box, Alt+F4) the same
+	/// way: staged edits are discarded only after the user confirms, and
+	/// nothing is ever written to the store on the way out. Cancel means
+	/// no net change.
+	/// </summary>
+	protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+	{
+		if (_dirty && !_confirming)
+		{
+			_confirming = true;
+			try
+			{
+				if (MessageBox.Show(this, "You have unsaved changes. Discard them?",
+					"Permissions", MessageBoxButton.YesNo, MessageBoxImage.Question)
+					!= MessageBoxResult.Yes)
+				{
+					e.Cancel = true;
+				}
+			}
+			finally
+			{
+				_confirming = false;
+			}
+		}
+
+		base.OnClosing(e);
 	}
 
 	private void MarkDirty()

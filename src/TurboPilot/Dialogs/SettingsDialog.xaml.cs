@@ -18,7 +18,9 @@ namespace TurboPilot.Dialogs;
 /// here, and Begin/End Session drive the session lifecycle.
 ///
 /// The dialog only queries services; actually starting an AI session is the
-/// caller's job once Begin Session returns true.
+/// caller's job once Begin Session returns true. Cancel (or the close
+/// box) persists nothing and changes no session state: like every other
+/// dialog here, Cancel means no net change.
 /// </summary>
 public partial class SettingsDialog : TurbolandFloatingDialog
 {
@@ -95,8 +97,6 @@ public partial class SettingsDialog : TurbolandFloatingDialog
 
 		checkApplyInstructions.IsChecked = settings.ApplyInstructions;
 		checkPreloadSkills.IsChecked = settings.PreloadSkills;
-
-		buttonEndSession.IsEnabled = sessionActive;
 
 		PopulateModes(settings.SelectedMode);
 		UpdateServiceFields();
@@ -336,9 +336,13 @@ public partial class SettingsDialog : TurbolandFloatingDialog
 
 	private void OnOpenCustomization(object sender, RoutedEventArgs e)
 	{
+		// Keep the current combo pick: SelectedMode only carries a value
+		// once Begin Session has run, so using it here would reset the
+		// user's in-dialog choice back to Standard.
+		var current = comboMode.SelectedItem as string ?? "Standard";
 		new CustomizeDialog().ShowDialog(this);
 		// The customization lists may have changed; refresh the agent modes.
-		PopulateModes(SelectedMode);
+		PopulateModes(current);
 	}
 
 	// -- Close paths ----------------------------------------------------------
@@ -371,12 +375,6 @@ public partial class SettingsDialog : TurbolandFloatingDialog
 
 		BeginRequested = true;
 		Close(true);
-	}
-
-	private void OnEndSession(object sender, RoutedEventArgs e)
-	{
-		EndRequested = true;
-		Close(false);
 	}
 
 	private void OnCancel(object sender, RoutedEventArgs e)

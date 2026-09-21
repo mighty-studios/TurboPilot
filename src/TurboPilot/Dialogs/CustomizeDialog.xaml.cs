@@ -27,6 +27,15 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 	// after staged folder additions.
 	private CustomizationLibrary _library;
 
+	// The caption without the unsaved-changes marker.
+	private readonly string _baseTitle;
+
+	private bool _dirty;
+
+	// True while the discard confirmation is on screen, so a second close
+	// attempt cannot call Close while the window is already closing.
+	private bool _confirming;
+
 	/// <summary>
 	/// The edited list of search folders. Only meaningful after the dialog
 	/// returns true.
@@ -36,6 +45,8 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 	public CustomizeDialog()
 	{
 		InitializeComponent();
+
+		_baseTitle = Title;
 
 		_folders = Settings.Load().CustomizationFolders
 			.Where(f => !string.IsNullOrWhiteSpace(f))
@@ -123,6 +134,7 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 		_folders.Add(trimmed);
 		ReloadList();
 		listBox.SelectedIndex = _folders.Count - 1;
+		MarkDirty();
 	}
 
 	private void OnDelete(object sender, RoutedEventArgs e)
@@ -141,6 +153,7 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 		ReloadList();
 		if (_folders.Count > 0)
 			listBox.SelectedIndex = Math.Min(i, _folders.Count - 1);
+		MarkDirty();
 	}
 
 	private bool IsDuplicate(string candidate) =>
@@ -190,6 +203,7 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 		// Write the flag explicitly rather than trusting the binding's
 		// update order relative to this event.
 		item.Enabled = checkBox.IsChecked == true;
+		MarkDirty();
 
 		// Keep the details pane honest if the toggled item is selected.
 		if (listPrompts.SelectedItem == item || listAgents.SelectedItem == item
@@ -335,6 +349,9 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 
 	private void OnOk(object sender, RoutedEventArgs e)
 	{
+		// The commit below is the save; the close guard must not ask twice.
+		_dirty = false;
+
 		var settings = Settings.Load();
 		settings.CustomizationFolders = new List<string>(_folders);
 		settings.Save();
@@ -348,7 +365,50 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 		Close(true);
 	}
 
-	private void OnCancel(object sender, RoutedEventArgs e) => Close(false);
+	private void OnCancel(object sender, RoutedEventArgs e)
+	{
+		if (_confirming)
+			return;
+
+		Close(false);
+	}
+
+	/// <summary>
+	/// Guards every close path (Cancel, the close box, Alt+F4) the same
+	/// way: staged edits are discarded only after the user confirms, and
+	/// nothing is ever written on the way out. Cancel means no net change.
+	/// </summary>
+	protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+	{
+		if (_dirty && !_confirming)
+		{
+			_confirming = true;
+			try
+			{
+				if (MessageBox.Show(this, "You have unsaved changes. Discard them?",
+					"Customization", MessageBoxButton.YesNo, MessageBoxImage.Question)
+					!= MessageBoxResult.Yes)
+				{
+					e.Cancel = true;
+				}
+			}
+			finally
+			{
+				_confirming = false;
+			}
+		}
+
+		base.OnClosing(e);
+	}
+
+	private void MarkDirty()
+	{
+		if (_dirty)
+			return;
+
+		_dirty = true;
+		Title = $"{_baseTitle} *";
+	}
 
 	// ------------------------------------------------------------------ options file
 
@@ -446,6 +506,7 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 		TransferEnabledInto(loaded.Instructions, _library.Instructions);
 		TransferEnabledInto(loaded.McpServers, _library.McpServers);
 		RefreshFoundItems();
+		MarkDirty();
 	}
 
 	private static IEnumerable<CustomizationItem> LoadedItems(CustomizationLibrary loaded) =>
