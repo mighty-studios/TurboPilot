@@ -135,9 +135,9 @@
 			<!-- Save/Load carry the scope's settings, not the scope itself:
 			the same option set can be loaded into any workspace. -->
 			<StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-				<Button x:Name="buttonSaveOptions" Content="Save Options..." Width="110"
+				<Button x:Name="buttonSaveOptions" Content="Save Options..." Width="170"
 						Click="OnSaveOptions" Margin="0,0,12,0"/>
-				<Button x:Name="buttonLoadOptions" Content="Load Options..." Width="110"
+				<Button x:Name="buttonLoadOptions" Content="Load Options..." Width="170"
 						Click="OnLoadOptions"/>
 			</StackPanel>
 
