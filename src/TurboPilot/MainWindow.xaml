@@ -21,6 +21,8 @@
                 <MenuItem Header="C_ustomization..." Click="OnCustomization"/>
                 <MenuItem Header="Pe_rmissions..." Click="OnPermissions"/>
                 <Separator/>
+                <MenuItem x:Name="menuEndSession" Header="_End Session" Click="OnEndSessionClick"/>
+                <Separator/>
                 <MenuItem Header="E_xit"/>
             </MenuItem>
             <MenuItem x:Name="menuTools" Header="_Tools">
@@ -44,8 +46,8 @@
                      values would outrank the theme's disabled-state triggers
                      and leave a disabled button painted in its enabled ink. -->
                 <Button x:Name="buttonAttachments" Content="+0" Width="40" Height="25" Margin="0,0,5,0" Click="ButtonAttachments_Click"/>
-                <Button x:Name="buttonStop" Content="Stop" Width="60" Height="25" Margin="0,0,5,0"/>
-                <Button x:Name="buttonSend" Content="Send" Width="80" Height="25"/>
+                <Button x:Name="buttonStop" Content="Stop" Width="60" Height="25" Margin="0,0,5,0" Click="ButtonStop_Click"/>
+                <Button x:Name="buttonSend" Content="Send" Width="80" Height="25" Click="ButtonSend_Click"/>
             </StackPanel>
         </StatusBar>
 

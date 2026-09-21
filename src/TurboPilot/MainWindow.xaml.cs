@@ -29,6 +29,17 @@ public partial class MainWindow : TurbolandWindow
 	// Attachments tracking
 	private readonly List<string> _attachments = new();
 
+	// The live AI session, or null between sessions.
+	private Ai.ChatService? _chat;
+
+	// Status line state: a short base phrase plus usage suffixes. The base
+	// is one of "Starting..", "Ready..", "Working.." or "Waiting..".
+	private string _statusBase = "Ready..";
+	private int _ctxUsed;
+	private int _ctxTotal;
+	private double _aic;
+	private bool _showAic;
+
 	public MainWindow()
 	{
 		InitializeComponent();
@@ -56,6 +67,9 @@ public partial class MainWindow : TurbolandWindow
 
 		// Initialize WebView2 asynchronously
 		_ = InitializeWebViewAsync();
+
+		// Ctrl+Enter in the prompt box sends the current input.
+		richTextBoxInput.PreviewKeyDown += Input_PreviewKeyDown;
 
 		// No session is active until the user starts or resumes one.
 		SetSessionActive(false);
@@ -92,6 +106,7 @@ public partial class MainWindow : TurbolandWindow
 			ActiveWorkspacePath = null;
 
 		menuTools.IsEnabled = active;
+		menuEndSession.IsEnabled = active;
 
 		richTextBoxInput.IsEnabled = active;
 		buttonHistoryPrev.IsEnabled = active;
@@ -101,9 +116,10 @@ public partial class MainWindow : TurbolandWindow
 		buttonStop.IsEnabled = active;
 		buttonSend.IsEnabled = active;
 
-		statusTextBlock.Text = active
-			? "Ready"
-			: "Start or resume a session to begin.";
+		// The prompt box only accepts typing while a session is running.
+		richTextBoxInput.IsReadOnly = !active;
+
+		UpdateStatus();
 	}
 
 	// ── Splitter drag handler ────────────────────────────────────────────────
@@ -599,10 +615,10 @@ public partial class MainWindow : TurbolandWindow
 
 	/// <summary>
 	/// Shows the Session Settings dialog. Begin Session brings the
-	/// session-dependent controls online and refreshes the customization
-	/// lists for the new workspace; End Session takes them back down.
-	/// The dialog itself only queries services and gathers options; no
-	/// AI session is started yet.
+	/// session-dependent controls online, refreshes the customization
+	/// lists for the new workspace and starts the Copilot SDK session
+	/// with the gathered options. Ending a session is the Session menu's
+	/// End Session item.
 	/// </summary>
 	private void OpenSettingsDialog()
 	{
@@ -614,22 +630,244 @@ public partial class MainWindow : TurbolandWindow
 			SetSessionActive(true);
 			ActiveWorkspacePath = dialog.WorkspacePath;
 			Customizations.CustomizationService.Rescan(dialog.WorkspacePath);
-			statusTextBlock.Text = $"Session started in: {dialog.WorkspacePath}";
-		}
-		else if (dialog.EndRequested)
-		{
-			EndSession();
+			_ = StartChatAsync(dialog);
 		}
 	}
 
 	/// <summary>
-	/// Ends the active session: gates the session-dependent controls back
-	/// off and clears the workspace scope. Session history and settings
-	/// persist; only the live session state goes away.
+	/// Session menu: ends the active session.
+	/// </summary>
+	private void OnEndSessionClick(object sender, RoutedEventArgs e) => EndSession();
+
+	/// <summary>
+	/// Ends the active session: disposes the SDK session, gates the
+	/// session-dependent controls back off and clears the workspace
+	/// scope. Session history and settings persist; only the live
+	/// session state goes away.
 	/// </summary>
 	public void EndSession()
 	{
+		var chat = _chat;
+		_chat = null;
+		if (chat is not null)
+			_ = chat.DisposeAsync().AsTask();
+
+		_ctxTotal = 0;
+		_ctxUsed = 0;
+		_aic = 0;
+		_showAic = false;
+
 		SetSessionActive(false);
+	}
+
+	// -- Chat round-trip ---------------------------------------------------------
+
+	/// <summary>
+	/// Starts the Copilot SDK session described by the settings dialog and
+	/// wires its events into the transcript and the status line. A failed
+	/// start is reported in the transcript and drops back to no session.
+	/// </summary>
+	private async Task StartChatAsync(Dialogs.SettingsDialog dialog)
+	{
+		var previous = _chat;
+		_chat = null;
+		if (previous is not null)
+			await previous.DisposeAsync();
+
+		_statusBase = "Starting..";
+		_ctxUsed = 0;
+		_ctxTotal = 0;
+		_aic = 0;
+		// Credits only exist against the Copilot service; a BYOK server
+		// has no meter to read.
+		_showAic = dialog.Provider != "Byok";
+		UpdateStatus();
+
+		var chat = new Ai.ChatService();
+		chat.DeltaReceived += AppendOutput;
+		chat.StatusReceived += line => AppendOutput($"\r\n{line}\r\n");
+		chat.ErrorReceived += line => AppendOutput($"\r\n[error] {line}\r\n");
+		chat.QuestionReceived += text =>
+		{
+			AppendOutput($"\r\n{text}\r\n\r\n");
+			SetStatusBase("Waiting..");
+		};
+		chat.TurnIdle += () => SetStatusBase("Ready..");
+		chat.UsageChanged += () => Dispatcher.BeginInvoke(() =>
+		{
+			_ctxUsed = chat.ContextUsedTokens;
+			_aic = chat.AicUsed;
+			UpdateStatus();
+		});
+
+		try
+		{
+			await chat.StartAsync(new Ai.ChatSessionOptions
+			{
+				WorkspaceFolder = dialog.WorkspacePath,
+				Model = dialog.SelectedModel,
+				ReasoningEffort = string.IsNullOrEmpty(dialog.SelectedEffort) ? null : dialog.SelectedEffort,
+				Mode = dialog.SelectedMode,
+				ContextWindowTokens = dialog.SelectedContextWindowTokens,
+				UseByok = dialog.Provider == "Byok",
+				ByokEndpoint = dialog.ByokEndpoint,
+				ByokApiKey = dialog.ByokApiKey,
+			});
+		}
+		catch (Exception ex)
+		{
+			await chat.DisposeAsync();
+			AppendOutput($"\r\n[error] Session start failed: {ex.Message}\r\n\r\n");
+			EndSession();
+			return;
+		}
+
+		_chat = chat;
+		_ctxTotal = chat.ContextWindowTokens;
+		AppendOutput($"\r\n--- Session {chat.SessionId} | {dialog.SelectedModel} | {dialog.SelectedMode} ---\r\n\r\n");
+		SetStatusBase("Ready..");
+	}
+
+	/// <summary>
+	/// Sets the status base phrase and repaints the status line. Safe to
+	/// call from SDK event threads.
+	/// </summary>
+	private void SetStatusBase(string text)
+	{
+		if (!Dispatcher.CheckAccess())
+		{
+			Dispatcher.BeginInvoke(new Action<string>(SetStatusBase), text);
+			return;
+		}
+
+		_statusBase = text;
+		UpdateStatus();
+	}
+
+	/// <summary>
+	/// Repaints the status line: the base phrase followed by context use
+	/// as whole-Ki "&lt;used&gt;/&lt;total&gt;K" and, for Copilot CLI
+	/// sessions, credits as "AiC=&lt;value&gt;".
+	/// </summary>
+	private void UpdateStatus()
+	{
+		if (!IsSessionActive)
+		{
+			statusTextBlock.Text = "Start or resume a session to begin.";
+			return;
+		}
+
+		var text = _statusBase;
+		if (_ctxTotal > 0)
+			text += $" {_ctxUsed / 1024}/{_ctxTotal / 1024}K";
+		if (_showAic)
+			text += $" AiC={_aic:0}";
+		statusTextBlock.Text = text;
+	}
+
+	/// <summary>
+	/// Send button: dispatches the prompt box to the session, or answers
+	/// an outstanding question when one is waiting.
+	/// </summary>
+	private async void ButtonSend_Click(object sender, RoutedEventArgs e)
+	{
+		await SendCurrentInputAsync();
+	}
+
+	/// <summary>
+	/// Stop button: aborts the turn in flight and releases any pending
+	/// question.
+	/// </summary>
+	private async void ButtonStop_Click(object sender, RoutedEventArgs e)
+	{
+		var chat = _chat;
+		if (chat is null) return;
+
+		await chat.AbortAsync();
+		AppendOutput("\r\n[stopped] Turn interrupted\r\n\r\n");
+		SetStatusBase("Ready..");
+	}
+
+	/// <summary>
+	/// Takes the text out of the prompt box and sends it. While a turn is
+	/// in flight the send interrupts it rather than queueing behind it,
+	/// matching the behavior users expect from the retro front end. The
+	/// user's message is echoed to the transcript so both output views
+	/// carry the full exchange.
+	/// </summary>
+	private async Task SendCurrentInputAsync()
+	{
+		var chat = _chat;
+		if (chat is null) return;
+
+		var text = GetInputText();
+		if (string.IsNullOrWhiteSpace(text) && _attachments.Count == 0) return;
+
+		richTextBoxInput.Document.Blocks.Clear();
+
+		// The next message answers an outstanding question (model question
+		// or permission prompt) instead of starting a new turn.
+		if (chat.HasPendingQuestion)
+		{
+			AppendOutput($"\r\n**You:** {text}\r\n\r\n");
+			chat.TryAnswerPending(text);
+			SetStatusBase("Working..");
+			return;
+		}
+
+		if (string.IsNullOrWhiteSpace(text)) return;
+
+		if (chat.IsWorking)
+		{
+			await chat.AbortAsync();
+			// Give the runtime's idle event a moment to land so the new
+			// turn's Working status is not clobbered by the old turn's
+			// idle. The cap keeps a missed event from wedging the send.
+			var sw = Stopwatch.StartNew();
+			while (chat.IsWorking && sw.ElapsedMilliseconds < 1500)
+				await Task.Delay(50);
+		}
+
+		var attachments = _attachments.ToArray();
+		_attachments.Clear();
+		UpdateAttachmentButton();
+
+		AppendOutput($"\r\n**You:** {text}\r\n\r\n");
+
+		try
+		{
+			await chat.SendAsync(text, attachments);
+			SetStatusBase("Working..");
+		}
+		catch (Exception ex)
+		{
+			AppendOutput($"\r\n[error] Send failed: {ex.Message}\r\n\r\n");
+		}
+	}
+
+	/// <summary>
+	/// Plain text of everything typed in the prompt box.
+	/// </summary>
+	private string GetInputText()
+	{
+		var range = new System.Windows.Documents.TextRange(
+			richTextBoxInput.Document.ContentStart,
+			richTextBoxInput.Document.ContentEnd);
+		return range.Text.Trim();
+	}
+
+	/// <summary>
+	/// Ctrl+Enter in the prompt box sends, like every other chat front
+	/// end this machine has ever run.
+	/// </summary>
+	private void Input_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+	{
+		if (e.Key == System.Windows.Input.Key.Enter
+			&& (System.Windows.Input.Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Control) != 0)
+		{
+			e.Handled = true;
+			_ = SendCurrentInputAsync();
+		}
 	}
 
 	/// <summary>

@@ -15,7 +15,7 @@ namespace TurboPilot.Dialogs;
 /// model hosting service (Copilot CLI or a BYOK OpenAI-compatible server),
 /// queries the service for its models, and chooses the model, reasoning
 /// effort and session mode. Permissions and Customization dialogs open from
-/// here, and Begin/End Session drive the session lifecycle.
+/// here, and Begin Session drives the session lifecycle.
 ///
 /// The dialog only queries services; actually starting an AI session is the
 /// caller's job once Begin Session returns true. Cancel (or the close
@@ -26,9 +26,6 @@ public partial class SettingsDialog : TurbolandFloatingDialog
 {
 	/// <summary>True once the user clicked Begin Session with a valid setup.</summary>
 	public bool BeginRequested { get; private set; }
-
-	/// <summary>True once the user clicked End Session.</summary>
-	public bool EndRequested { get; private set; }
 
 	/// <summary>Selected workspace folder. Valid after Begin Session.</summary>
 	public string? WorkspacePath { get; private set; }
@@ -50,6 +47,12 @@ public partial class SettingsDialog : TurbolandFloatingDialog
 
 	/// <summary>Selected mode name.</summary>
 	public string SelectedMode { get; private set; } = "Standard";
+
+	/// <summary>
+	/// Context window of the selected model in tokens, as advertised by the
+	/// service at query time. 0 when the selection carries none.
+	/// </summary>
+	public int SelectedContextWindowTokens { get; private set; }
 
 	public bool ApplyInstructions { get; private set; } = true;
 
@@ -366,6 +369,9 @@ public partial class SettingsDialog : TurbolandFloatingDialog
 		SelectedModel = modelIndex >= 0 && modelIndex < _models.Count
 			? _models[modelIndex].Id
 			: "";
+		SelectedContextWindowTokens = modelIndex >= 0 && modelIndex < _models.Count
+			? _models[modelIndex].ContextWindowTokens
+			: 0;
 		SelectedEffort = comboEffort.SelectedItem as string ?? "";
 		SelectedMode = comboMode.SelectedItem as string ?? "Standard";
 		ApplyInstructions = checkApplyInstructions.IsChecked == true;
