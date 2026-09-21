@@ -32,6 +32,11 @@ public partial class MainWindow : TurbolandWindow
 	// The live AI session, or null between sessions.
 	private Ai.ChatService? _chat;
 
+	// Model id and session id of the live session, shown in the
+	// sessionInfo badge. Both null while no session is running.
+	private string? _sessionModel;
+	private string? _sessionId;
+
 	// Status line state: a short base phrase plus usage suffixes. The base
 	// is one of "Starting..", "Ready..", "Working.." or "Waiting..".
 	private string _statusBase = "Ready..";
@@ -120,6 +125,25 @@ public partial class MainWindow : TurbolandWindow
 		richTextBoxInput.IsReadOnly = !active;
 
 		UpdateStatus();
+		UpdateSessionInfo();
+	}
+
+	/// <summary>
+	/// Repaints the session badge: the model in use and the session id
+	/// while a live session exists, otherwise a notice that none is active.
+	/// </summary>
+	private void UpdateSessionInfo()
+	{
+		if (_chat is not null && _sessionId is not null)
+		{
+			sessionInfo.Text = string.IsNullOrEmpty(_sessionModel)
+				? _sessionId
+				: $"{_sessionModel} | {_sessionId}";
+		}
+		else
+		{
+			sessionInfo.Text = "No session active";
+		}
 	}
 
 	// ── Splitter drag handler ────────────────────────────────────────────────
@@ -649,6 +673,8 @@ public partial class MainWindow : TurbolandWindow
 	{
 		var chat = _chat;
 		_chat = null;
+		_sessionModel = null;
+		_sessionId = null;
 		if (chat is not null)
 			_ = chat.DisposeAsync().AsTask();
 
@@ -671,6 +697,9 @@ public partial class MainWindow : TurbolandWindow
 	{
 		var previous = _chat;
 		_chat = null;
+		_sessionModel = null;
+		_sessionId = null;
+		UpdateSessionInfo();
 		if (previous is not null)
 			await previous.DisposeAsync();
 
@@ -723,7 +752,10 @@ public partial class MainWindow : TurbolandWindow
 		}
 
 		_chat = chat;
+		_sessionModel = dialog.SelectedModel;
+		_sessionId = chat.SessionId;
 		_ctxTotal = chat.ContextWindowTokens;
+		UpdateSessionInfo();
 		AppendOutput($"\r\n--- Session {chat.SessionId} | {dialog.SelectedModel} | {dialog.SelectedMode} ---\r\n\r\n");
 		SetStatusBase("Ready..");
 	}
