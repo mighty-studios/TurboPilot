@@ -4,7 +4,7 @@
 	xmlns:ctl="clr-namespace:TurbolandTheme.Wpf.Controls;assembly=TurbolandTheme.Wpf"
 	x:Class="TurboPilot.Dialogs.SettingsDialog"
 	Title="SESSION SETTINGS"
-	Width="900">
+	Width="920" Height="430" MinWidth="920" MinHeight="430">
 
 	<!-- Session settings: workspace folder, model service selection, the
 	options read back from the service, and the toggles that shape how a
@@ -101,7 +101,7 @@
 							ToolTip="Contact the service and repopulate the model list"/>
 				</Grid>
 
-				<Grid Margin="0,8,0,0">
+				<Grid Margin="0,8,0,0" Height="28">
 					<Grid.ColumnDefinitions>
 						<ColumnDefinition Width="Auto"/>
 						<ColumnDefinition Width="*"/>
@@ -170,9 +170,6 @@
 			<StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
 				<Button x:Name="buttonCancel" Content="Cancel" Width="100"
 						IsCancel="True" Click="OnCancel" Margin="0,0,8,0"/>
-				<Button x:Name="buttonEndSession" Content="End Session" Width="140"
-						Click="OnEndSession" Margin="0,0,8,0"
-						ToolTip="End the active session"/>
 				<Button x:Name="buttonBeginSession" Content="Begin Session" Width="160"
 						IsDefault="True" Click="OnBeginSession"
 						ToolTip="Save these settings and start the session"/>
