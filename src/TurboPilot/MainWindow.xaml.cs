@@ -585,25 +585,51 @@ public partial class MainWindow : TurbolandWindow
 		// TODO: Navigate to the next (newer) prompt in history
 	}
 
-	// ── New Session ──────────────────────────────────────────────────────────
+	// ── Session settings ─────────────────────────────────────────────────────
 
 	/// <summary>
-	/// Opens the New Session dialog to select a workspace folder.
+	/// Opens the Session Settings dialog from New Session.
 	/// </summary>
-	private void OnNewSession(object sender, RoutedEventArgs e)
-	{
-		var dialog = new Dialogs.ChooseFolderDialog();
-		if (dialog.ShowDialog(this) != true || string.IsNullOrEmpty(dialog.WorkspacePath))
-			return;
+	private void OnNewSession(object sender, RoutedEventArgs e) => OpenSettingsDialog();
 
-		// TODO: Start the AI session with the selected workspace folder
-		// For now, bring the session-dependent controls online, refresh
-		// the customization lists for the new workspace and report it in
-		// the status bar.
-		SetSessionActive(true);
-		ActiveWorkspacePath = dialog.WorkspacePath;
-		Customizations.CustomizationService.Rescan(dialog.WorkspacePath);
-		statusTextBlock.Text = $"Session started in: {dialog.WorkspacePath}";
+	/// <summary>
+	/// Opens the Session Settings dialog from the menu.
+	/// </summary>
+	private void OnSettings(object sender, RoutedEventArgs e) => OpenSettingsDialog();
+
+	/// <summary>
+	/// Shows the Session Settings dialog. Begin Session brings the
+	/// session-dependent controls online and refreshes the customization
+	/// lists for the new workspace; End Session takes them back down.
+	/// The dialog itself only queries services and gathers options; no
+	/// AI session is started yet.
+	/// </summary>
+	private void OpenSettingsDialog()
+	{
+		var dialog = new Dialogs.SettingsDialog(ActiveWorkspacePath, IsSessionActive);
+		dialog.ShowDialog(this);
+
+		if (dialog.BeginRequested && !string.IsNullOrEmpty(dialog.WorkspacePath))
+		{
+			SetSessionActive(true);
+			ActiveWorkspacePath = dialog.WorkspacePath;
+			Customizations.CustomizationService.Rescan(dialog.WorkspacePath);
+			statusTextBlock.Text = $"Session started in: {dialog.WorkspacePath}";
+		}
+		else if (dialog.EndRequested)
+		{
+			EndSession();
+		}
+	}
+
+	/// <summary>
+	/// Ends the active session: gates the session-dependent controls back
+	/// off and clears the workspace scope. Session history and settings
+	/// persist; only the live session state goes away.
+	/// </summary>
+	public void EndSession()
+	{
+		SetSessionActive(false);
 	}
 
 	/// <summary>

@@ -17,6 +17,7 @@
                 <MenuItem Header="_New Session..." Click="OnNewSession"/>
                 <MenuItem Header="_Past Sessions..."/>
                 <Separator/>
+                <MenuItem Header="Set_tings..." Click="OnSettings"/>
                 <MenuItem Header="C_ustomization..." Click="OnCustomization"/>
                 <MenuItem Header="Pe_rmissions..." Click="OnPermissions"/>
                 <Separator/>

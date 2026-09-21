@@ -29,6 +29,35 @@ public sealed class Settings
 	public List<string> CustomizationFolders { get; set; } = new();
 
 	/// <summary>
+	/// Model hosting service for new sessions: "CopilotCli" or "Byok".
+	/// </summary>
+	public string ModelProvider { get; set; } = "CopilotCli";
+
+	/// <summary>
+	/// Composed base URL of the BYOK OpenAI-compatible server
+	/// (e.g. http://10.0.0.234:13305/api/v1). Unused for the CLI provider.
+	/// </summary>
+	public string ByokEndpoint { get; set; } = "";
+
+	/// <summary>API key sent to the BYOK server. Unused for the CLI provider.</summary>
+	public string ByokApiKey { get; set; } = "";
+
+	/// <summary>Model id selected in the Settings dialog, if any.</summary>
+	public string SelectedModel { get; set; } = "";
+
+	/// <summary>Reasoning effort selected in the Settings dialog, if any.</summary>
+	public string SelectedEffort { get; set; } = "";
+
+	/// <summary>Session mode: Standard, Plan, Autopilot, or a custom agent name.</summary>
+	public string SelectedMode { get; set; } = "Standard";
+
+	/// <summary>Whether instruction files load into the session context.</summary>
+	public bool ApplyInstructions { get; set; } = true;
+
+	/// <summary>Whether enabled skills preload into the session context.</summary>
+	public bool PreloadSkills { get; set; } = true;
+
+	/// <summary>
 	/// Loads settings from disk. Returns a default instance if the file
 	/// doesn't exist or fails to parse.
 	/// </summary>
@@ -45,7 +74,7 @@ public sealed class Settings
 		}
 		catch
 		{
-			// Corrupted or unreadable settings file — return defaults
+			// Corrupted or unreadable settings file: return defaults
 			return new Settings();
 		}
 	}
