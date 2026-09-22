@@ -10,6 +10,52 @@
 					Width="800" Height="960"
 					av:DesignWidth="800" av:DesignHeight="960">
 
+	<ctl:TurbolandWindow.Resources>
+		<!-- Arrow cell for the prompt history gutter. The stock theme button
+		     is a green push button at least ButtonMinWidth (72px) wide with a
+		     one-cell shadow offset, neither of which survives being clipped to
+		     a 24px strip: the label is centered outside the visible area and
+		     the shadow covers most of the face. This is the scroll bar arrow
+		     instead, one cell tall and as wide as the strip gives it. The
+		     triangles are CP437 glyphs present in the bundled face, written as
+		     character references so the source stays ASCII. -->
+		<Style x:Key="HistoryArrowButton" TargetType="Button">
+			<Setter Property="Focusable" Value="False"/>
+			<Setter Property="MinWidth" Value="0"/>
+			<Setter Property="MinHeight" Value="0"/>
+			<Setter Property="Padding" Value="0"/>
+			<Setter Property="Height" Value="{DynamicResource Turboland.Metric.CellHeight}"/>
+			<Setter Property="FontFamily" Value="{DynamicResource Turboland.Font.Primary}"/>
+			<Setter Property="FontSize" Value="{DynamicResource Turboland.Font.Size.Primary}"/>
+			<Setter Property="Foreground" Value="{DynamicResource Turboland.Brush.ScrollTrackStipple}"/>
+			<Setter Property="Background" Value="Transparent"/>
+			<Setter Property="TextOptions.TextFormattingMode" Value="Display"/>
+			<Setter Property="TextOptions.TextRenderingMode" Value="Grayscale"/>
+			<Setter Property="SnapsToDevicePixels" Value="True"/>
+			<Setter Property="Template">
+				<Setter.Value>
+					<ControlTemplate TargetType="Button">
+						<Border x:Name="face" Background="{TemplateBinding Background}" SnapsToDevicePixels="True">
+							<ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+						</Border>
+						<ControlTemplate.Triggers>
+							<Trigger Property="IsMouseOver" Value="True">
+								<Setter TargetName="face" Property="Background" Value="{DynamicResource Turboland.Brush.ControlSelected}"/>
+							</Trigger>
+							<Trigger Property="IsPressed" Value="True">
+								<Setter TargetName="face" Property="Background" Value="{DynamicResource Turboland.Brush.ControlShadow}"/>
+								<Setter Property="Foreground" Value="{DynamicResource Turboland.Brush.ControlSelectedForeground}"/>
+							</Trigger>
+							<Trigger Property="IsEnabled" Value="False">
+								<Setter Property="Foreground" Value="{DynamicResource Turboland.Brush.DisabledForeground}"/>
+							</Trigger>
+						</ControlTemplate.Triggers>
+					</ControlTemplate>
+				</Setter.Value>
+			</Setter>
+		</Style>
+	</ctl:TurbolandWindow.Resources>
+
     <DockPanel>
 
         <Menu DockPanel.Dock="Top">
@@ -115,30 +161,30 @@
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
 
-                <!-- History navigation panel (left side of input area) -->
-                <Border Background="#343434" BorderBrush="#565656" BorderThickness="1">
-                    <StackPanel Orientation="Vertical" VerticalAlignment="Stretch">
-                        <Button x:Name="buttonHistoryPrev" 
-								Content="▲" 
-								Background="#343434" 
-								Foreground="#949494" 
-								BorderThickness="0" 
-								FontFamily="Segoe UI" 
-								FontSize="8" 
-								Height="20" 
-								VerticalAlignment="Top" 
-								Click="ButtonHistoryPrev_Click"/>
-                        <Button x:Name="buttonHistoryNext" 
-								Content="▼" 
-								Background="#343434" 
-								Foreground="#949494" 
-								BorderThickness="1" 
-								FontFamily="Segoe UI" 
-								FontSize="8" 
-								Height="20" 
-								VerticalAlignment="Bottom" 
-								Click="ButtonHistoryNext_Click"/>
-                    </StackPanel>
+                <!-- Prompt history gutter: the older prompt is one cell up,
+                     the newer one a cell down, pinned to the ends of the
+                     strip so the empty middle reads as furniture rather than
+                     as two buttons that lost their labels. -->
+                <Border Background="{DynamicResource Turboland.Brush.ControlFace}"
+                        BorderBrush="{DynamicResource Turboland.Brush.ControlShadow}"
+                        BorderThickness="1">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <Button x:Name="buttonHistoryPrev" Grid.Row="0"
+                                Style="{StaticResource HistoryArrowButton}"
+                                Content="&#x25B2;"
+                                ToolTip="Older prompt"
+                                Click="ButtonHistoryPrev_Click"/>
+                        <Button x:Name="buttonHistoryNext" Grid.Row="2"
+                                Style="{StaticResource HistoryArrowButton}"
+                                Content="&#x25BC;"
+                                ToolTip="Newer prompt"
+                                Click="ButtonHistoryNext_Click"/>
+                    </Grid>
                 </Border>
 
                 <Grid Grid.Column="1">

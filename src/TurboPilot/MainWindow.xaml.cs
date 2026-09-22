@@ -29,6 +29,11 @@ public partial class MainWindow : TurbolandWindow
 	// Attachments tracking
 	private readonly List<string> _attachments = new();
 
+	// Prompts sent this run, cycled through by the arrows beside the input
+	// box. Kept across sessions: ending a session drops the live
+	// connection, not what was typed into it.
+	private readonly PromptHistory _promptHistory = new();
+
 	// The live AI session, or null between sessions.
 	private Ai.ChatService? _chat;
 
@@ -101,8 +106,8 @@ public partial class MainWindow : TurbolandWindow
 	/// able to start a session, read the transcript or get help. The
 	/// Tools menu, the prompt input, the history navigation buttons and
 	/// the attachments, Stop and Send buttons are gated on session state.
-	/// Once prompt history cycling exists, the history buttons will be
-	/// further restricted to times when there is somewhere to cycle to.
+	/// The history arrows carry a second condition: they also need
+	/// somewhere to cycle to, which UpdateHistoryButtons applies.
 	/// </summary>
 	public void SetSessionActive(bool active)
 	{
@@ -114,8 +119,7 @@ public partial class MainWindow : TurbolandWindow
 		menuEndSession.IsEnabled = active;
 
 		richTextBoxInput.IsEnabled = active;
-		buttonHistoryPrev.IsEnabled = active;
-		buttonHistoryNext.IsEnabled = active;
+		UpdateHistoryButtons();
 
 		buttonAttachments.IsEnabled = active;
 		buttonStop.IsEnabled = active;
@@ -605,24 +609,52 @@ public partial class MainWindow : TurbolandWindow
 			new Action(richTextBoxOutput.ScrollToHome));
 	}
 
-	// ── History navigation stubs ─────────────────────────────────────────────
+	// ── Prompt history navigation ────────────────────────────────────────────
 
 	/// <summary>
-	/// Handles the Previous (▲) history button click.
-	/// TODO: Implement prompt history cycling to older prompts.
+	/// Older prompt: steps the input box back through what has been sent.
+	/// Anything typed but not yet sent is set aside and returns when the
+	/// user steps past the newest entry again.
 	/// </summary>
 	private void ButtonHistoryPrev_Click(object sender, RoutedEventArgs e)
 	{
-		// TODO: Navigate to the previous (older) prompt in history
+		SetInputText(_promptHistory.NavigateBack(GetInputText()));
+		UpdateHistoryButtons();
 	}
 
 	/// <summary>
-	/// Handles the Next (▼) history button click.
-	/// TODO: Implement prompt history cycling to newer prompts.
+	/// Newer prompt: steps forward, restoring the set-aside draft once the
+	/// most recent prompt has been passed.
 	/// </summary>
 	private void ButtonHistoryNext_Click(object sender, RoutedEventArgs e)
 	{
-		// TODO: Navigate to the next (newer) prompt in history
+		SetInputText(_promptHistory.NavigateForward());
+		UpdateHistoryButtons();
+	}
+
+	/// <summary>
+	/// Availability of the gutter arrows: a session must be running and
+	/// there must be somewhere to step. With nothing sent yet both are off;
+	/// browsing to the ends turns off the arrow that has nowhere to go.
+	/// </summary>
+	private void UpdateHistoryButtons()
+	{
+		buttonHistoryPrev.IsEnabled = IsSessionActive && _promptHistory.CanGoBack;
+		buttonHistoryNext.IsEnabled = IsSessionActive && _promptHistory.CanGoForward;
+	}
+
+	/// <summary>
+	/// Replaces the prompt box with plain text and leaves the caret at the
+	/// end, so a recalled prompt is ready to edit or resend.
+	/// </summary>
+	private void SetInputText(string text)
+	{
+		var paragraph = new System.Windows.Documents.Paragraph(
+			new System.Windows.Documents.Run(text));
+		richTextBoxInput.Document.Blocks.Clear();
+		richTextBoxInput.Document.Blocks.Add(paragraph);
+		richTextBoxInput.CaretPosition = paragraph.ContentEnd;
+		richTextBoxInput.Focus();
 	}
 
 	// ── Session settings ─────────────────────────────────────────────────────
@@ -834,6 +866,14 @@ public partial class MainWindow : TurbolandWindow
 
 		var text = GetInputText();
 		if (string.IsNullOrWhiteSpace(text) && _attachments.Count == 0) return;
+
+		// Only text enters the history. A send carrying nothing but an
+		// attachment has no words worth recalling.
+		if (!string.IsNullOrWhiteSpace(text))
+		{
+			_promptHistory.Add(text);
+			UpdateHistoryButtons();
+		}
 
 		richTextBoxInput.Document.Blocks.Clear();
 
