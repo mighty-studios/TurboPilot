@@ -6,12 +6,13 @@
 					xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
 					xmlns:av="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="av" x:Class="TurboPilot.MainWindow"
 					Title="TURBO-PILOT"
+					Closing="OnWindowClosing"
 					WindowStartupLocation="CenterScreen"
 					Width="800" Height="960"
 					av:DesignWidth="800" av:DesignHeight="960">
 
-	<ctl:TurbolandWindow.Resources>
-		<!-- Arrow cell for the prompt history gutter. The stock theme button
+    <ctl:TurbolandWindow.Resources>
+        <!-- Arrow cell for the prompt history gutter. The stock theme button
 		     is a green push button at least ButtonMinWidth (72px) wide with a
 		     one-cell shadow offset, neither of which survives being clipped to
 		     a 24px strip: the label is centered outside the visible area and
@@ -19,42 +20,42 @@
 		     instead, one cell tall and as wide as the strip gives it. The
 		     triangles are CP437 glyphs present in the bundled face, written as
 		     character references so the source stays ASCII. -->
-		<Style x:Key="HistoryArrowButton" TargetType="Button">
-			<Setter Property="Focusable" Value="False"/>
-			<Setter Property="MinWidth" Value="0"/>
-			<Setter Property="MinHeight" Value="0"/>
-			<Setter Property="Padding" Value="0"/>
-			<Setter Property="Height" Value="{DynamicResource Turboland.Metric.CellHeight}"/>
-			<Setter Property="FontFamily" Value="{DynamicResource Turboland.Font.Primary}"/>
-			<Setter Property="FontSize" Value="{DynamicResource Turboland.Font.Size.Primary}"/>
-			<Setter Property="Foreground" Value="{DynamicResource Turboland.Brush.ScrollTrackStipple}"/>
-			<Setter Property="Background" Value="Transparent"/>
-			<Setter Property="TextOptions.TextFormattingMode" Value="Display"/>
-			<Setter Property="TextOptions.TextRenderingMode" Value="Grayscale"/>
-			<Setter Property="SnapsToDevicePixels" Value="True"/>
-			<Setter Property="Template">
-				<Setter.Value>
-					<ControlTemplate TargetType="Button">
-						<Border x:Name="face" Background="{TemplateBinding Background}" SnapsToDevicePixels="True">
-							<ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-						</Border>
-						<ControlTemplate.Triggers>
-							<Trigger Property="IsMouseOver" Value="True">
-								<Setter TargetName="face" Property="Background" Value="{DynamicResource Turboland.Brush.ControlSelected}"/>
-							</Trigger>
-							<Trigger Property="IsPressed" Value="True">
-								<Setter TargetName="face" Property="Background" Value="{DynamicResource Turboland.Brush.ControlShadow}"/>
-								<Setter Property="Foreground" Value="{DynamicResource Turboland.Brush.ControlSelectedForeground}"/>
-							</Trigger>
-							<Trigger Property="IsEnabled" Value="False">
-								<Setter Property="Foreground" Value="{DynamicResource Turboland.Brush.DisabledForeground}"/>
-							</Trigger>
-						</ControlTemplate.Triggers>
-					</ControlTemplate>
-				</Setter.Value>
-			</Setter>
-		</Style>
-	</ctl:TurbolandWindow.Resources>
+        <Style x:Key="HistoryArrowButton" TargetType="Button">
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="MinWidth" Value="0"/>
+            <Setter Property="MinHeight" Value="0"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Height" Value="{DynamicResource Turboland.Metric.CellHeight}"/>
+            <Setter Property="FontFamily" Value="{DynamicResource Turboland.Font.Primary}"/>
+            <Setter Property="FontSize" Value="{DynamicResource Turboland.Font.Size.Primary}"/>
+            <Setter Property="Foreground" Value="{DynamicResource Turboland.Brush.ScrollTrackStipple}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="TextOptions.TextFormattingMode" Value="Display"/>
+            <Setter Property="TextOptions.TextRenderingMode" Value="Grayscale"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="face" Background="{TemplateBinding Background}" SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="face" Property="Background" Value="{DynamicResource Turboland.Brush.ControlSelected}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="face" Property="Background" Value="{DynamicResource Turboland.Brush.ControlShadow}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource Turboland.Brush.ControlSelectedForeground}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="{DynamicResource Turboland.Brush.DisabledForeground}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </ctl:TurbolandWindow.Resources>
 
     <DockPanel>
 
@@ -69,7 +70,7 @@
                 <Separator/>
                 <MenuItem x:Name="menuEndSession" Header="_End Session" Click="OnEndSessionClick"/>
                 <Separator/>
-                <MenuItem Header="E_xit"/>
+                <MenuItem Header="E_xit" Click="OnExitClick"/>
             </MenuItem>
             <MenuItem x:Name="menuTools" Header="_Tools">
                 <MenuItem Header="Open _Powershell"/>
@@ -215,8 +216,8 @@
                  while a session runs, a notice when none does. Right-aligned;
                  the left margin keeps it clear of the tab headers. -->
             <TextBlock x:Name="sessionInfo" HorizontalAlignment="Right" TextAlignment="Right"
-						Margin="320,10,8,0" TextWrapping="Wrap" VerticalAlignment="Top"
-						Text="No session active"/>
+						Margin="0,10,8,0" TextWrapping="Wrap" VerticalAlignment="Top"
+						Text="No session active" Width="631"/>
         </Grid>
 
     </DockPanel>

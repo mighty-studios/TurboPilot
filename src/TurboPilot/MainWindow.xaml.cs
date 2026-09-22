@@ -966,4 +966,23 @@ public partial class MainWindow : TurbolandWindow
 	{
 		new Dialogs.PermissionsDialog(ActiveWorkspacePath).ShowDialog(this);
 	}
+
+	// -- Exit ------------------------------------------------------------------
+
+	/// <summary>
+	/// The frame's close box and the Session menu's Exit both arrive here,
+	/// so one guard covers both. The program quits only on an explicit Yes;
+	/// No, Escape and the question's own close box all leave it running.
+	/// </summary>
+	private void OnWindowClosing(object? sender, System.ComponentModel.CancelEventArgs e)
+	{
+		if (!Dialogs.YesNoDialog.Ask(this, "Exit the Program?"))
+			e.Cancel = true;
+	}
+
+	/// <summary>
+	/// Session menu: quits through the same guard the close box uses, so the
+	/// two paths cannot drift apart.
+	/// </summary>
+	private void OnExitClick(object sender, RoutedEventArgs e) => Close();
 }

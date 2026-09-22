@@ -1,0 +1,49 @@
+<ctl:TurbolandFloatingDialog x:Class="TurboPilot.Dialogs.YesNoDialog"
+					xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+					xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+					xmlns:ctl="clr-namespace:TurbolandTheme.Wpf.Controls;assembly=TurbolandTheme.Wpf"
+					Title="Confirm">
+
+	<!-- The app's answer to a plain question: a line of text over Yes and No.
+	     The floating dialog contributes the chrome, the drag behavior, the hard
+	     shadow and true OS modality, and it sizes itself to this content. -->
+
+	<ctl:TurbolandFloatingDialog.Resources>
+		<!-- The destructive choice. The theme paints every push button the same
+		     green and ships no token for a choice that ends something, so the
+		     pair is composed here out of the raw VGA palette: Red face, White
+		     ink. Black on Red measures 2.7:1 and vanishes; White measures
+		     7.7:1. Setters rather than local values, because a local value
+		     outranks the theme's disabled-state trigger and would leave a
+		     disabled button painted in its enabled ink. -->
+		<SolidColorBrush x:Key="DangerFace" Color="{DynamicResource Turboland.Color.Palette.4}"/>
+		<SolidColorBrush x:Key="DangerInk" Color="{DynamicResource Turboland.Color.Palette.15}"/>
+		<Style x:Key="DangerButton" TargetType="Button"
+			   BasedOn="{StaticResource {x:Type Button}}">
+			<Setter Property="Background" Value="{StaticResource DangerFace}"/>
+			<Setter Property="Foreground" Value="{StaticResource DangerInk}"/>
+		</Style>
+	</ctl:TurbolandFloatingDialog.Resources>
+
+	<StackPanel>
+		<!-- Thirty cells across at the narrowest so a one-word question is not
+		     a postage stamp, fifty at the widest so a long one stays inside the
+		     screen. The eighteen below is a clear row: a button's shadow is
+		     painted outside its own box and would otherwise sit on the text. -->
+		<TextBlock x:Name="Message" TextWrapping="Wrap"
+					MinWidth="270" MaxWidth="450"
+					Margin="0,0,0,18"/>
+
+		<!-- Yes is the default, so Enter answers it. No is the cancel button,
+		     so Escape answers that instead. Neither answer is taken until the
+		     user gives one: the frame's close box leaves the dialog with no
+		     result at all, which the caller reads as No. -->
+		<StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+			<Button x:Name="buttonYes" Content="Yes" IsDefault="True" Click="OnYes"
+					Margin="{DynamicResource Turboland.Size.ButtonStripMargin}"/>
+			<Button x:Name="buttonNo" Content="No" IsCancel="True" Click="OnNo"
+					Style="{StaticResource DangerButton}"
+					Margin="{DynamicResource Turboland.Size.ButtonStripMargin}"/>
+		</StackPanel>
+	</StackPanel>
+</ctl:TurbolandFloatingDialog>
