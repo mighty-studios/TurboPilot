@@ -46,10 +46,10 @@ public sealed class ChatSessionOptions
 ///
 /// The session is created with streaming on, so assistant text arrives as
 /// AssistantMessageDeltaEvent pieces. A turn ends when the runtime reports
-/// the session idle. Permission requests consult the Permissions store: a
-/// pre-approved operation (or any request in Autopilot mode) runs silently;
-/// anything else becomes a chat question the user answers with their next
-/// message. Model questions (the SDK's user-input requests) work the same
+/// the session idle. Permission requests consult the Permissions store as
+/// it stands at that moment: a pre-approved operation, a file inside a
+/// granted folder, or any request in Autopilot mode runs silently; anything
+/// else becomes a chat question the user answers with their next message. Model questions (the SDK's user-input requests) work the same
 /// way: there are no pop-up dialogs in this app.
 ///
 /// Events fire on the SDK's worker threads. Subscribers that touch the UI
@@ -339,10 +339,10 @@ public sealed class ChatService : IAsyncDisposable
 	{
 		var kind = request.Kind ?? "";
 
-		// Autopilot runs everything; otherwise the pre-approved operations
-		// from the Permissions dialog run silently.
-		if (_options.Mode == "Autopilot"
-			|| PermissionService.IsOperationAllowed(kind, _options.WorkspaceFolder))
+		// Autopilot runs everything; otherwise the Permissions dialog
+		// decides, either by pre-approving the operation or by granting the
+		// folder a file request points at.
+		if (IsPreApproved(request, kind))
 		{
 			return await PermissionHandler.ApproveAll(request, invocation);
 		}
@@ -361,6 +361,42 @@ public sealed class ChatService : IAsyncDisposable
 			return await PermissionHandler.ApproveAll(request, invocation);
 
 		return GitHub.Copilot.Rpc.PermissionDecision.Reject(null);
+	}
+
+	/// <summary>
+	/// True when a request may run without asking: Autopilot is on, the
+	/// operation's toggle is pre-approved, or the target of a file request
+	/// is covered by a folder grant. Both rules read the store as it stands
+	/// at the moment of the request, which is what lets a change made in the
+	/// Permissions dialog answer the next request instead of waiting for a
+	/// new session.
+	/// </summary>
+	private bool IsPreApproved(PermissionRequest request, string kind)
+	{
+		if (_options.Mode == "Autopilot")
+			return true;
+
+		if (PermissionService.IsOperationAllowed(kind, _options.WorkspaceFolder))
+			return true;
+
+		string? path;
+		PermissionAccess access;
+		switch (request)
+		{
+			case PermissionRequestRead read:
+				path = read.Path;
+				access = PermissionAccess.Read;
+				break;
+			case PermissionRequestWrite write:
+				path = write.FileName;
+				access = PermissionAccess.Write;
+				break;
+			default:
+				return false;
+		}
+
+		return !string.IsNullOrWhiteSpace(path)
+			&& PermissionService.IsAllowed(path, access, _options.WorkspaceFolder);
 	}
 #pragma warning restore GHCP001
 

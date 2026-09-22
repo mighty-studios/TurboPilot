@@ -350,6 +350,7 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 	private void OnOk(object sender, RoutedEventArgs e)
 	{
 		// The commit below is the save; the close guard must not ask twice.
+		bool changed = _dirty;
 		_dirty = false;
 
 		var settings = Settings.Load();
@@ -361,6 +362,18 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 		// key so nothing the user just chose is lost.
 		CustomizationService.Commit(_library);
 		CustomizationService.Rescan(settings.LastWorkspacePath);
+
+		// The rescan replaces the library the next session reads, but a
+		// session already running took its instructions, skills and agent
+		// modes into itself when it started and keeps them. Say so rather
+		// than leave the user looking for the effect of a change that is
+		// real but not yet in force.
+		if (changed)
+		{
+			MessageDialog.Ok(this,
+				"Customization changes take effect on the next session.",
+				"Customization");
+		}
 
 		Close(true);
 	}

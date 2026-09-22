@@ -1,0 +1,27 @@
+<ctl:TurbolandFloatingDialog x:Class="TurboPilot.Dialogs.MessageDialog"
+					xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+					xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+					xmlns:ctl="clr-namespace:TurbolandTheme.Wpf.Controls;assembly=TurbolandTheme.Wpf"
+					Title="TurboPilot">
+
+	<!-- A statement the user acknowledges rather than answers. Same chrome
+	     as the Yes/No question: the floating dialog contributes the frame,
+	     the drag behavior, the hard shadow and true OS modality, and it
+	     sizes itself to this content. -->
+
+	<StackPanel>
+		<!-- Same measure as the question dialog: thirty cells at the
+		     narrowest, fifty at the widest, with a clear row below so a
+		     button's shadow cannot land on the text. -->
+		<TextBlock x:Name="Message" TextWrapping="Wrap"
+					MinWidth="270" MaxWidth="450"
+					Margin="0,0,0,18"/>
+
+		<!-- OK answers both Enter and Escape, so the box cannot be shut
+		     any other way and there is nothing to lose by showing it. -->
+		<StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+			<Button x:Name="buttonOk" Content="OK" IsDefault="True" IsCancel="True" Click="OnOk"
+					Margin="{DynamicResource Turboland.Size.ButtonStripMargin}"/>
+		</StackPanel>
+	</StackPanel>
+</ctl:TurbolandFloatingDialog>

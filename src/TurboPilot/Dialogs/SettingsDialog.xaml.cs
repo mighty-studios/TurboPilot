@@ -71,6 +71,10 @@ public partial class SettingsDialog : TurbolandFloatingDialog
 	// The workspace whose permissions are in force, or null for app defaults.
 	private readonly string? _activeWorkspacePath;
 
+	// True when a session is already running, so Begin Session replaces it
+	// and the confirmation can warn that the current one ends.
+	private readonly bool _sessionActive;
+
 	// Ink used for query error messages.
 	private static readonly Brush ErrorBrush =
 		new SolidColorBrush(Color.FromRgb(220, 120, 120));
@@ -81,6 +85,7 @@ public partial class SettingsDialog : TurbolandFloatingDialog
 	public SettingsDialog(string? activeWorkspacePath, bool sessionActive)
 	{
 		_activeWorkspacePath = activeWorkspacePath;
+		_sessionActive = sessionActive;
 		InitializeComponent();
 
 		var settings = Settings.Load();
@@ -358,6 +363,16 @@ public partial class SettingsDialog : TurbolandFloatingDialog
 			SetStatus("Choose a workspace folder that exists.", isError: true);
 			return;
 		}
+
+		// Starting a session is a deliberate act, so it is confirmed rather
+		// than taken as a side effect of closing the settings. Declining
+		// leaves the dialog open and untouched: the choices stay editable and
+		// nothing has been persisted or connected.
+		var question = _sessionActive
+			? "Start a new session? The current session will end."
+			: "Start a new session?";
+		if (!YesNoDialog.Ask(this, question, "Session"))
+			return;
 
 		WorkspacePath = workspace;
 		Provider = IsByok ? "Byok" : "CopilotCli";
