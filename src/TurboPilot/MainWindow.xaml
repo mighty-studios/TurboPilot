@@ -92,7 +92,8 @@
                      by SetSessionActive, not here. No explicit colors: local
                      values would outrank the theme's disabled-state triggers
                      and leave a disabled button painted in its enabled ink. -->
-                <Button x:Name="buttonAttachments" Content="+0" Width="40" Height="25" Margin="0,0,5,0" Click="ButtonAttachments_Click"/>
+                <Button x:Name="buttonAttachments" Content="+0" Width="40" Height="25" Margin="0,0,5,0"
+						ToolTip="manage attachments" Click="ButtonAttachments_Click"/>
                 <Button x:Name="buttonStop" Content="Stop" Width="60" Height="25" Margin="0,0,5,0" Click="ButtonStop_Click"/>
                 <Button x:Name="buttonSend" Content="Send" Width="80" Height="25" Click="ButtonSend_Click"/>
             </StackPanel>

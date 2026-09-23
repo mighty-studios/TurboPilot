@@ -177,20 +177,17 @@ public partial class MainWindow : TurbolandWindow
 	// ── Attachments ──────────────────────────────────────────────────────────
 
 	/// <summary>
-	/// Opens the attachment dialog when the +0 button is clicked.
-	/// Updates the button text to show the current attachment count.
+	/// Opens the attachments dialog when the +0 button is clicked. The
+	/// dialog edits a copy of the pending list; OK replaces it and the
+	/// button text follows the new count.
 	/// </summary>
 	private void ButtonAttachments_Click(object sender, RoutedEventArgs e)
 	{
-		var dialog = new AttachmentDialog();
-		dialog.Initialize();
+		var dialog = new AttachmentsDialog(_attachments);
 		if (dialog.ShowDialog(this) != true) return;
 
-		foreach (var path in dialog.AddedPaths)
-		{
-			if (!_attachments.Contains(path))
-				_attachments.Add(path);
-		}
+		_attachments.Clear();
+		_attachments.AddRange(dialog.Attachments);
 		UpdateAttachmentButton();
 	}
 
@@ -905,6 +902,14 @@ public partial class MainWindow : TurbolandWindow
 		UpdateAttachmentButton();
 
 		AppendOutput($"\r\n**You:** {text}\r\n\r\n");
+
+		// Name the attachments in the transcript so the record shows what
+		// actually left with the prompt.
+		if (attachments.Length > 0)
+		{
+			var names = attachments.Select(System.IO.Path.GetFileName);
+			AppendOutput($"[attached] {string.Join(", ", names)}\r\n\r\n");
+		}
 
 		try
 		{
