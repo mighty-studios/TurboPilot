@@ -195,25 +195,20 @@ public partial class MainWindow : TurbolandWindow
 	// ── Splitter drag handler ────────────────────────────────────────────────
 
 	/// <summary>
-	/// Handles dragging the splitter Thumb to resize the output/input panels.
-	/// Positive delta (drag down) increases the input area and shrinks output.
-	/// Negative delta (drag up) increases the output area and shrinks input.
+	/// Moves the divider while preserving proportional row sizing.
 	/// </summary>
 	private void SplitterThumb_DragDelta(object sender, System.Windows.Controls.Primitives.DragDeltaEventArgs e)
 	{
-		var delta = e.VerticalChange;
-		var outputHeight = OutputRow.ActualHeight + delta;
-		var inputHeight = InputRow.ActualHeight - delta;
-
-		// Minimum sizes: 80px for output, 40px for input
+		var totalHeight = OutputRow.ActualHeight + InputRow.ActualHeight;
 		const double minOutput = 80;
-		const double minInput = 40;
+		var minInput = 40 + labelUserPrompt.ActualHeight
+			+ promptInputGrid.Margin.Top + promptInputGrid.Margin.Bottom;
+		if (totalHeight < minOutput + minInput) return;
 
-		if (outputHeight >= minOutput && inputHeight >= minInput)
-		{
-			OutputRow.Height = new GridLength(outputHeight);
-			InputRow.Height = new GridLength(inputHeight);
-		}
+		var outputHeight = Math.Clamp(OutputRow.ActualHeight + e.VerticalChange, minOutput, totalHeight - minInput);
+		// Pixel heights would leave unused space after the window grows.
+		OutputRow.Height = new GridLength(outputHeight, GridUnitType.Star);
+		InputRow.Height = new GridLength(totalHeight - outputHeight, GridUnitType.Star);
 	}
 
 	// ── Attachments ──────────────────────────────────────────────────────────

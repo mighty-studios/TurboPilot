@@ -159,17 +159,25 @@
 				   DragDelta="SplitterThumb_DragDelta"/>
 
             <!-- Prompt input area at the bottom -->
-            <Grid Grid.Row="2" Margin="4,2,4,4">
+            <Grid x:Name="promptInputGrid" Grid.Row="2" Margin="4,2,4,4">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="24"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
 
+                <Label x:Name="labelUserPrompt" Grid.Row="0" Grid.ColumnSpan="2"
+						Content="User Prompt" Target="{Binding ElementName=richTextBoxInput}"
+						Foreground="{Binding Foreground, ElementName=richTextBoxInput}"/>
+
                 <!-- Prompt history gutter: the older prompt is one cell up,
                      the newer one a cell down, pinned to the ends of the
                      strip so the empty middle reads as furniture rather than
                      as two buttons that lost their labels. -->
-                <Border Background="{DynamicResource Turboland.Brush.ControlFace}"
+                <Border Grid.Row="1" Background="{DynamicResource Turboland.Brush.ControlFace}"
                         BorderBrush="{DynamicResource Turboland.Brush.ControlShadow}"
                         BorderThickness="1">
                     <Grid>
@@ -191,7 +199,7 @@
                     </Grid>
                 </Border>
 
-                <Grid Grid.Column="1">
+                <Grid Grid.Row="1" Grid.Column="1">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="*"/>
                         <RowDefinition Height="Auto"/>

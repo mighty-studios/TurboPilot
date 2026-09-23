@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
 using System.Windows.Threading;
 using Microsoft.Web.WebView2.Wpf;
@@ -66,6 +67,7 @@ internal static class UiChecks
 			Check.Equal("Start or resume a session to begin.", Status(window), "Initial status");
 			window.Show();
 			await Check.UntilAsync(() => Field<bool>(window, "_webViewReady"), "The rendered output did not initialize.");
+			await CheckPromptLayoutAsync(window);
 			CheckMediatorDialog(window, workspace);
 
 			var starting = InvokeTask(window, "StartChatAsync", options, null);
@@ -270,6 +272,104 @@ internal static class UiChecks
 	private sealed class TimerStop(DispatcherTimer timer) : IDisposable
 	{
 		public void Dispose() => timer.Stop();
+	}
+
+	private static async Task CheckPromptLayoutAsync(MainWindow window)
+	{
+		var main = Control<Grid>(window, "MainGrid");
+		var prompt = Control<Grid>(window, "promptInputGrid");
+		var label = Control<Label>(window, "labelUserPrompt");
+		var input = Control<RichTextBox>(window, "richTextBoxInput");
+		var body = (Grid)input.Parent;
+		var history = (Border)((Grid)Control<Button>(window, "buttonHistoryPrev").Parent).Parent;
+		var splitter = Control<Thumb>(window, "SplitterThumb");
+		var notice = Control<TextBlock>(window, "mediatorNotice");
+		var outputRow = main.RowDefinitions[0];
+		var inputRow = main.RowDefinitions[2];
+		var originalSize = new Size(window.Width, window.Height);
+		var originalOutput = outputRow.Height;
+		var originalInput = inputRow.Height;
+		var originalNotice = notice.Text;
+		var originalVisibility = notice.Visibility;
+
+		async Task LayoutAsync()
+		{
+			await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.ApplicationIdle);
+		}
+
+		void Near(double expected, double actual, string message) =>
+			Check.True(Math.Abs(expected - actual) <= 1.5, $"{message}: expected {expected:0.##}, got {actual:0.##}.");
+
+		void CheckBounds()
+		{
+			var labelBottom = label.TranslatePoint(new Point(0, label.ActualHeight), prompt).Y;
+			var bodyTop = body.TranslatePoint(new Point(), prompt).Y;
+			Check.True(label.IsVisible && label.ActualHeight > 0, "Keep the prompt label visible.");
+			Check.True(bodyTop >= labelBottom - 1.5, "Place the editor below the label.");
+			Near(bodyTop, history.TranslatePoint(new Point(), prompt).Y, "Shift the history gutter with the editor");
+			var bodyBottom = body.TranslatePoint(new Point(0, body.ActualHeight), main).Y;
+			Near(main.ActualHeight - prompt.Margin.Bottom, bodyBottom, "Anchor the prompt body to the bottom of the available area");
+			var trailingRows = body.RowDefinitions.Skip(Grid.GetRow(input) + Grid.GetRowSpan(input)).Sum(row => row.ActualHeight);
+			var inputBottom = input.TranslatePoint(new Point(0, input.ActualHeight), main).Y;
+			Near(bodyBottom - trailingRows - input.Margin.Bottom, inputBottom, "Fill the editor's available height without a bottom gap");
+			Near(body.ActualWidth - input.Margin.Left - input.Margin.Right, input.ActualWidth, "Fill the editor's available width");
+			Check.True(input.ActualHeight > 0, "Keep an editable input area.");
+		}
+
+		async Task DragAsync(double change)
+		{
+			splitter.RaiseEvent(new DragDeltaEventArgs(0, change) { RoutedEvent = Thumb.DragDeltaEvent });
+			await LayoutAsync();
+			Check.True(outputRow.Height.IsStar && inputRow.Height.IsStar, "Splitter dragging must retain stretch-sized rows.");
+			CheckBounds();
+		}
+
+		try
+		{
+			Check.Equal("User Prompt", label.Content, "Display the requested label");
+			Check.True(ReferenceEquals(input, label.Target), "Associate the label with the prompt editor.");
+			window.Height = 640;
+			await LayoutAsync();
+			CheckBounds();
+			var initialHeight = input.ActualHeight;
+			window.Height = 760;
+			await LayoutAsync();
+			CheckBounds();
+			Check.True(input.ActualHeight > initialHeight, "Grow the input area when the window grows.");
+			var beforeDrag = input.ActualHeight;
+			await DragAsync(70);
+			Near(beforeDrag - 70, input.ActualHeight, "Move the divider down by the requested distance");
+			window.Height = 860;
+			await LayoutAsync();
+			CheckBounds();
+			window.Height = 560;
+			await LayoutAsync();
+			CheckBounds();
+			await DragAsync(-90);
+			window.Width = 1000;
+			window.Height = 740;
+			await LayoutAsync();
+			CheckBounds();
+			notice.Text = "A visible notice still occupies only its assigned layout area.";
+			notice.Visibility = Visibility.Visible;
+			await LayoutAsync();
+			CheckBounds();
+			notice.Visibility = Visibility.Collapsed;
+			await LayoutAsync();
+			await DragAsync(10000);
+			await DragAsync(-10000);
+			Console.WriteLine("PASS User Prompt label and gap-free input layout across window resizing and splitter dragging");
+		}
+		finally
+		{
+			notice.Text = originalNotice;
+			notice.Visibility = originalVisibility;
+			outputRow.Height = originalOutput;
+			inputRow.Height = originalInput;
+			window.Width = originalSize.Width;
+			window.Height = originalSize.Height;
+			await LayoutAsync();
+		}
 	}
 
 	private static void CheckMediatorDialog(MainWindow window, TestWorkspace workspace)

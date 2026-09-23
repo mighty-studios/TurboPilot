@@ -8,6 +8,8 @@ Open **Session -> New Session**, choose an existing workspace and service, query
 
 Send a prompt with **Send** or **Ctrl+Enter**. Sending while a response is running interrupts that turn before starting the replacement. **Stop** interrupts without sending another prompt. The attachment button manages the next prompt's files; the arrows recall earlier prompts and restore an unsent draft.
 
+The **User Prompt** editor fills the lower pane. Drag its top divider to adjust the split; both panes continue filling the window when it is resized.
+
 The **Raw** tab preserves streamed conversation text. **Rendered** supports markdown and Mermaid diagrams, plus optional Mediator formatting of completed responses. Questions and permission requests appear in chat: reply with an option number or its text, or a freeform answer when offered. Invalid answers leave the question pending. Plan approval also happens in chat.
 
 The status line shows `Starting..`, `Ready..`, `Working..`, or `Waiting..`, followed by context usage in whole Ki tokens. Cloud sessions also display whole AI Credits as `AiC=<value>`.
