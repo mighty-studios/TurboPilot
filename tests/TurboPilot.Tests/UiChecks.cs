@@ -8,6 +8,7 @@ using System.Windows.Threading;
 using Microsoft.Web.WebView2.Wpf;
 using TurboPilot.Ai;
 using TurboPilot.Dialogs;
+using TurboPilot.Mediation;
 
 namespace TurboPilot.Tests;
 
@@ -61,6 +62,7 @@ internal static class UiChecks
 			Check.Equal("Start or resume a session to begin.", Status(window), "Initial status");
 			window.Show();
 			await Check.UntilAsync(() => Field<bool>(window, "_webViewReady"), "The rendered output did not initialize.");
+			CheckMediatorDialog(window, workspace);
 
 			var starting = InvokeTask(window, "StartChatAsync", options, null);
 			Check.True(Status(window).StartsWith("Starting.."), "Show Starting while connecting.");
@@ -166,6 +168,37 @@ internal static class UiChecks
 			if (hasBrowser)
 				await exited.Task.WaitAsync(TimeSpan.FromSeconds(15));
 		}
+	}
+
+	private static void CheckMediatorDialog(MainWindow window, TestWorkspace workspace)
+	{
+		var configuration = new MediatorConfiguration(Path.Combine(workspace.Root, "mediator-dialog"));
+		var runtime = new FakeLocalRuntime();
+		var accepted = new MediatorDialog(configuration, runtime);
+		accepted.Loaded += (_, _) =>
+		{
+			var selected = Control<ComboBox>(accepted, "comboModel").SelectedItem as LocalModelDescriptor;
+			Check.Equal(MediatorSettings.DefaultModelAlias, selected?.Alias, "Select the preferred compatible model");
+			Control<CheckBox>(accepted, "checkEnabled").IsChecked = true;
+			Control<CheckBox>(accepted, "checkDebug").IsChecked = true;
+			Check.True(Control<Button>(accepted, "buttonOk").IsEnabled, "Allow enabling a downloaded model.");
+			Click(accepted, "buttonOk");
+		};
+		Check.Equal(true, accepted.ShowDialog(window), "Save local options on OK");
+		var saved = configuration.Load();
+		Check.True(saved.Enabled && saved.DebugRaw, "Persist the selected flags.");
+		Check.Equal(0, runtime.Loads, "The settings dialog must not start generation.");
+		var canceled = new MediatorDialog(configuration, runtime);
+		canceled.Loaded += (_, _) =>
+		{
+			Control<ComboBox>(canceled, "comboModel").SelectedIndex = 1;
+			Check.True(!Control<Button>(canceled, "buttonOk").IsEnabled, "Require downloading a new model before enabling it.");
+			Control<CheckBox>(canceled, "checkReword").IsChecked = false;
+			Invoke(canceled, "OnCancel", canceled, new RoutedEventArgs());
+		};
+		Check.Equal(false, canceled.ShowDialog(window), "Cancel the edited local options");
+		Check.Equal(saved, configuration.Load(), "Cancel must not persist edits");
+		Console.WriteLine("PASS Mediator dialog model selection, download gating, OK, and Cancel");
 	}
 
 	private static async Task ChoosePastSessionAsync(Application application, MainWindow window, string sessionId, string button)

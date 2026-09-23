@@ -65,6 +65,7 @@
                 <MenuItem x:Name="menuPastSessions" Header="_Past Sessions..." Click="OnPastSessions"/>
                 <Separator/>
                 <MenuItem x:Name="menuSettings" Header="Set_tings..." Click="OnSettings"/>
+                <MenuItem x:Name="menuMediator" Header="_Mediator..." Click="OnMediator"/>
                 <MenuItem Header="C_ustomization..." Click="OnCustomization"/>
                 <MenuItem Header="Pe_rmissions..." Click="OnPermissions"/>
                 <Separator/>

@@ -9,6 +9,7 @@ using TurboPilot.Ai;
 using TurboPilot.Customizations;
 using TurboPilot.Dialogs;
 using TurboPilot.Sessions;
+using TurboPilot.Mediation;
 
 namespace TurboPilot;
 
@@ -51,6 +52,8 @@ public partial class MainWindow : TurbolandWindow
 	private bool _sendingInput;
 	private bool _closing;
 	private bool _closeApproved;
+	private readonly MediatorConfiguration _mediatorConfiguration = new();
+	private readonly ILocalModelRuntime _localRuntime = new FoundryModelRuntime();
 
 	// Model id and session id of the live session, shown in the
 	// sessionInfo badge. Both null while no session is running.
@@ -148,6 +151,7 @@ public partial class MainWindow : TurbolandWindow
 		menuNewSession.IsEnabled = !_sessionChanging && !_closing;
 		menuPastSessions.IsEnabled = !_sessionChanging && !_closing;
 		menuSettings.IsEnabled = !_sessionChanging && !_closing;
+		menuMediator.IsEnabled = !_sessionChanging && !_closing;
 
 		richTextBoxInput.IsEnabled = ready;
 		UpdateHistoryButtons();
@@ -1093,6 +1097,12 @@ public partial class MainWindow : TurbolandWindow
 		new Dialogs.PermissionsDialog(ActiveWorkspacePath).ShowDialog(this);
 	}
 
+	private void OnMediator(object sender, RoutedEventArgs e)
+	{
+		try { new MediatorDialog(_mediatorConfiguration, _localRuntime).ShowDialog(this); }
+		catch (Exception ex) { MessageDialog.Ok(this, "Cannot open Mediator settings: " + ex.Message, "Mediator"); }
+	}
+
 	// -- Exit ------------------------------------------------------------------
 
 	/// <summary>
@@ -1109,6 +1119,8 @@ public partial class MainWindow : TurbolandWindow
 			return;
 		_closing = true;
 		await EndSessionAsync();
+		try { await _localRuntime.DisposeAsync(); }
+		catch (Exception ex) { MessageDialog.Ok(this, "Local runtime shutdown failed: " + ex.Message, "Mediator"); }
 		_closeApproved = true;
 		Close();
 	}

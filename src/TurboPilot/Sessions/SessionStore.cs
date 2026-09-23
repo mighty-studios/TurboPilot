@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using TurboPilot.Ai;
+using TurboPilot.Storage;
 
 namespace TurboPilot.Sessions;
 
@@ -112,25 +113,7 @@ public sealed class SessionStore
 		WriteAtomic(path, stream => JsonSerializer.Serialize(stream, record, JsonOptions));
 	}
 
-	private void WriteAtomic(string path, Action<Stream> write)
-	{
-		var temporaryPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-		Directory.CreateDirectory(_directory);
-		try
-		{
-			using (var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-			{
-				write(stream);
-				stream.Flush(flushToDisk: true);
-			}
-			File.Move(temporaryPath, path, overwrite: true);
-		}
-		finally
-		{
-			if (File.Exists(temporaryPath))
-				File.Delete(temporaryPath);
-		}
-	}
+	private static void WriteAtomic(string path, Action<Stream> write) => AtomicFile.Write(path, write);
 
 	private string FilePath(string sessionId, string extension)
 	{

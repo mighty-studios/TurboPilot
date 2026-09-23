@@ -24,7 +24,13 @@ Customization changes apply when starting or resuming a session. Automatic disco
 
 Display transcripts and metadata are stored under `%LOCALAPPDATA%\TurboPilot\sessions`. Runtime conversation state remains in the SDK's session storage. Provider credentials are not copied into transcript metadata; resuming a session that used an API key requires the matching endpoint and key in Settings. Missing history, connection failures, and save failures are reported explicitly.
 
-Mediator filtering is not implemented yet. Pass-through input and output hooks are available for future integration.
+## Local Mediator
+
+**Session -> Mediator** lists text models compatible with the installed local execution providers. The preferred model is `phi-3.5-mini`. **Download Model** caches a model before it can be enabled; **Prepare Acceleration** installs available GPU/NPU execution providers and refreshes the catalog. CPU execution is available without that optional preparation.
+
+Options are opt-in and saved only on **OK**. Downloads are retained when the dialog is canceled. Editable instructions and task skills live under `%LOCALAPPDATA%\TurboPilot\mediator`; **Open Configuration Folder** opens them for an external editor. Existing edits are never overwritten.
+
+The embedded runtime and settings are available. Chat transformation, summary handoff, and monitoring integration are still in progress.
 
 ## Build
 
