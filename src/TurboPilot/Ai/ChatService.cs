@@ -1,417 +1,466 @@
 using System.IO;
+using System.Text;
 using GitHub.Copilot;
 using TurboPilot.Permissions;
+using TurboPilot.Sessions;
 
 namespace TurboPilot.Ai;
 
-/// <summary>
-/// Everything the main window gathered in the Settings dialog that a
-/// Copilot SDK session needs at creation time.
-/// </summary>
-public sealed class ChatSessionOptions
-{
-	/// <summary>Workspace folder the session runs in; null when none was picked.</summary>
-	public string? WorkspaceFolder { get; init; }
-
-	/// <summary>Model id selected in the Settings dialog; empty lets the runtime choose.</summary>
-	public string Model { get; init; } = "";
-
-	/// <summary>Reasoning effort; null when the model or service offers none.</summary>
-	public string? ReasoningEffort { get; init; }
-
-	/// <summary>Session mode: Standard, Plan or Autopilot.</summary>
-	public string Mode { get; init; } = "Standard";
-
-	/// <summary>
-	/// Context window of the selected model in tokens, as advertised by the
-	/// service at query time. 0 when unknown; the service then falls back to
-	/// the runtime's own catalog.
-	/// </summary>
-	public int ContextWindowTokens { get; init; }
-
-	/// <summary>True when the session talks to a BYOK OpenAI-compatible server.</summary>
-	public bool UseByok { get; init; }
-
-	/// <summary>Composed BYOK base URL. Unused for the CLI provider.</summary>
-	public string ByokEndpoint { get; init; } = "";
-
-	/// <summary>BYOK API key. Unused for the CLI provider.</summary>
-	public string ByokApiKey { get; init; } = "";
-}
-
-/// <summary>
-/// Owns one live Copilot SDK session and turns its event stream into the
-/// simple callbacks the main window needs: streaming text, turn lifecycle,
-/// usage numbers, and questions that must be answered in chat.
-///
-/// The session is created with streaming on, so assistant text arrives as
-/// AssistantMessageDeltaEvent pieces. A turn ends when the runtime reports
-/// the session idle. Permission requests consult the Permissions store as
-/// it stands at that moment: a pre-approved operation, a file inside a
-/// granted folder, or any request in Autopilot mode runs silently; anything
-/// else becomes a chat question the user answers with their next message. Model questions (the SDK's user-input requests) work the same
-/// way: there are no pop-up dialogs in this app.
-///
-/// Events fire on the SDK's worker threads. Subscribers that touch the UI
-/// must marshal to the dispatcher themselves.
-/// </summary>
 public sealed class ChatService : IAsyncDisposable
 {
-	private readonly object _pendingLock = new();
-
+	private readonly object _sync = new();
+	private readonly SemaphoreSlim _lifecycle = new(1, 1);
+	private readonly SemaphoreSlim _sending = new(1, 1);
+	private readonly CancellationTokenSource _lifetime = new();
+	private readonly Queue<PendingQuestion> _questions = new();
+	private readonly HashSet<string> _streamedMessages = [];
+	private readonly HashSet<string> _completedMessages = [];
+	private readonly HashSet<string> _serverWarnings = new(StringComparer.OrdinalIgnoreCase);
+	private readonly StringBuilder _transcript = new();
+	private readonly SessionStore _store;
+	private readonly Func<ChatSessionOptions, CopilotClient> _createClient;
 	private CopilotClient? _client;
 	private CopilotSession? _session;
 	private ChatSessionOptions _options = new();
-
-	// The question currently awaiting the user's next chat message. Both
-	// model questions and permission prompts share this slot: only one can
-	// be outstanding at a time because the runtime blocks the turn on it.
-	private TaskCompletionSource<string>? _pendingAnswer;
-
-	// Deltas seen since the last idle. The final assistant message repeats
-	// the streamed text, so it is only used when nothing streamed.
-	private int _turnDeltas;
-
+	private SessionRecord? _record;
+	private bool _acceptQuestions = true;
+	private bool _transcriptWriteFailed;
+	private volatile bool _isWorking;
+	private int _disposeStarted;
 	private long _sessionAicNano;
+	private TaskCompletionSource? _turnIdle;
+	private Task? _disposeTask;
+	private AgentMode _agentMode;
+	private bool _startAttempted;
+	private bool _historyActive;
 
-	public ChatService()
+	public ChatService(SessionStore? store = null)
+		: this(store ?? new SessionStore(), options => new CopilotClient(new CopilotClientOptions
+		{
+			WorkingDirectory = options.WorkspaceFolder,
+		}))
 	{
 	}
 
-	// -- Callbacks -------------------------------------------------------------
+	internal ChatService(SessionStore store, Func<ChatSessionOptions, CopilotClient> createClient)
+	{
+		_store = store;
+		_createClient = createClient;
+	}
 
-	/// <summary>Streaming assistant text, verbatim, as each piece arrives.</summary>
-	public event Action<string>? DeltaReceived;
-
-	/// <summary>Short meta lines for the transcript (tool activity, notices).</summary>
-	public event Action<string>? StatusReceived;
-
-	/// <summary>An error reported by the runtime.</summary>
+	// Callbacks may arrive on worker threads.
+	public event Action<string>? TranscriptReceived;
 	public event Action<string>? ErrorReceived;
-
-	/// <summary>
-	/// A question the user must answer in chat: the model's own question or
-	/// a permission prompt, already formatted as display text.
-	/// </summary>
-	public event Action<string>? QuestionReceived;
-
-	/// <summary>The current turn has ended; the session is idle again.</summary>
-	public event Action? TurnIdle;
-
-	/// <summary>Context or credit usage changed; re-read the usage properties.</summary>
+	public event Action? StateChanged;
 	public event Action? UsageChanged;
 
-	// -- Mediator hooks ---------------------------------------------------------
-	//
-	// Pass-through seams for the Mediator: one filter on the way to the
-	// model, one on the way back. They stay identity functions until the
-	// Mediator lands.
-
-	/// <summary>Transforms the user's prompt before it is sent. Null sends it verbatim.</summary>
 	public Func<string, string>? UserPromptFilter { get; set; }
-
-	/// <summary>Transforms assistant text before it reaches the transcript. Null passes it through.</summary>
 	public Func<string, string>? ModelOutputFilter { get; set; }
 
-	// -- State ------------------------------------------------------------------
+	public string? SessionId { get; private set; }
+	public string Model => _options.Model;
+	public bool IsWorking => _isWorking;
+	public int ContextWindowTokens { get; private set; }
+	public int ContextUsedTokens { get; private set; }
+	public double AicUsed => Interlocked.Read(ref _sessionAicNano) / 1_000_000_000.0;
+	public SessionRecord? Record => _record;
 
-	/// <summary>Id of the live session, or null before start.</summary>
-	public string? SessionId => _session?.SessionId;
+	public string Transcript
+	{
+		get { lock (_sync) return _transcript.ToString(); }
+	}
 
-	/// <summary>True while a prompt is in flight.</summary>
-	public bool IsWorking { get; private set; }
-
-	/// <summary>True when the next chat message should answer a pending question.</summary>
 	public bool HasPendingQuestion
 	{
-		get
-		{
-			lock (_pendingLock)
-				return _pendingAnswer is not null;
-		}
+		get { lock (_sync) return _questions.Count > 0; }
 	}
 
-	/// <summary>Context window of the active model in tokens; 0 when unknown.</summary>
-	public int ContextWindowTokens { get; private set; }
+	public Task StartAsync(ChatSessionOptions options, CancellationToken cancellationToken = default) =>
+		ConnectAsync(options, null, cancellationToken);
 
-	/// <summary>Prompt tokens used by the most recent user-driven call.</summary>
-	public int ContextUsedTokens { get; private set; }
+	public Task ResumeAsync(string sessionId, ChatSessionOptions options, CancellationToken cancellationToken = default) =>
+		ConnectAsync(options, sessionId, cancellationToken);
 
-	/// <summary>Copilot credits spent this session, accumulated across all calls.</summary>
-	public double AicUsed => _sessionAicNano / 1_000_000_000.0;
-
-	// -- Lifecycle ----------------------------------------------------------------
-
-	/// <summary>
-	/// Starts the bundled CLI and creates the session described by
-	/// <paramref name="options"/>. Throws to the caller on failure; a failed
-	/// start leaves no half-built session behind.
-	/// </summary>
-	public async Task StartAsync(ChatSessionOptions options, CancellationToken cancellationToken = default)
+	private async Task ConnectAsync(ChatSessionOptions options, string? resumeId, CancellationToken cancellationToken)
 	{
-		_options = options;
-		ContextWindowTokens = options.ContextWindowTokens;
-
-		_client = new CopilotClient(new CopilotClientOptions
-		{
-			WorkingDirectory = string.IsNullOrWhiteSpace(options.WorkspaceFolder)
-				? null
-				: options.WorkspaceFolder,
-		});
-
-		await _client.StartAsync(cancellationToken);
-
-		// The dialog may not have carried a window (older saved settings, or
-		// a model list that reported none). Ask the running runtime once.
-		if (ContextWindowTokens <= 0)
-			ContextWindowTokens = await LookupContextWindowAsync(options.Model, cancellationToken);
-
+		using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
+		var token = linked.Token;
+		await _lifecycle.WaitAsync(token);
+		var starting = false;
 		try
 		{
-			_session = await _client.CreateSessionAsync(new SessionConfig
+			ObjectDisposedException.ThrowIf(_disposeStarted != 0, this);
+			if (_startAttempted)
+				throw new InvalidOperationException("Create a new service to start or resume another session.");
+			_startAttempted = true;
+			starting = true;
+			if (!string.IsNullOrWhiteSpace(options.WorkspaceFolder) && !Directory.Exists(options.WorkspaceFolder))
+				throw new DirectoryNotFoundException($"Workspace '{options.WorkspaceFolder}' no longer exists.");
+
+			_options = options with { Customizations = options.Customizations.Clone() };
+			_agentMode = options.Mode switch
 			{
-				SessionId = GenerateSessionId(options.WorkspaceFolder),
-				Model = string.IsNullOrWhiteSpace(options.Model) ? null : options.Model,
-				ReasoningEffort = string.IsNullOrWhiteSpace(options.ReasoningEffort) ? null : options.ReasoningEffort,
-				Streaming = true,
-				SystemMessage = BuildSystemMessage(),
-				OnPermissionRequest = HandlePermissionRequestAsync,
-				OnUserInputRequest = HandleUserInputRequestAsync,
-				Provider = BuildProviderConfig(),
-			}, cancellationToken);
+				"Plan" => AgentMode.Plan,
+				"Autopilot" => AgentMode.Autopilot,
+				_ => AgentMode.Interactive,
+			};
+			SessionId = resumeId ?? GenerateSessionId(options.WorkspaceFolder);
+			ContextWindowTokens = options.ContextWindowTokens;
+
+			if (resumeId is not null)
+			{
+				_record = _store.Load(resumeId);
+				var transcript = _store.ReadTranscript(resumeId);
+				lock (_sync)
+				{
+					_transcript.Append(transcript);
+					ContextUsedTokens = _record.ContextUsedTokens;
+					_sessionAicNano = _record.AicNano;
+					if (ContextWindowTokens <= 0)
+						ContextWindowTokens = _record.ContextWindowTokens;
+				}
+				TranscriptReceived?.Invoke(transcript);
+			}
+
+			SessionConfigBase config = resumeId is null
+				? new SessionConfig { SessionId = SessionId }
+				: new ResumeSessionConfig { ContinuePendingWork = false };
+			SessionConfiguration.Apply(config, _options);
+			config.OnPermissionRequest = HandlePermissionRequestAsync;
+			config.OnUserInputRequest = HandleUserInputRequestAsync;
+			config.OnExitPlanModeRequest = HandleExitPlanModeRequestAsync;
+			config.OnAutoModeSwitchRequest = HandleAutoModeSwitchRequestAsync;
+			config.OnEvent = HandleSessionEvent;
+
+			_client = _createClient(_options);
+			await _client.StartAsync(token);
+			if (ContextWindowTokens <= 0)
+				ContextWindowTokens = await LookupContextWindowAsync(token);
+			if (config.Provider is { } provider && ContextWindowTokens > 0)
+				provider.MaxPromptTokens = ContextWindowTokens;
+
+			_session = config is SessionConfig create
+				? await _client.CreateSessionAsync(create, token)
+				: await _client.ResumeSessionAsync(SessionId, (ResumeSessionConfig)config, token);
+			token.ThrowIfCancellationRequested();
+#pragma warning disable GHCP001
+			await _session.Rpc.Mode.SetAsync(_agentMode switch
+			{
+				AgentMode.Plan => SessionMode.Plan,
+				AgentMode.Autopilot => SessionMode.Autopilot,
+				_ => SessionMode.Interactive,
+			}, token);
+#pragma warning restore GHCP001
+
+			lock (_sync)
+			{
+				if (_record is null)
+					_record = _store.Create(SessionId, _options, _transcript.ToString());
+				else
+					_store.WriteTranscript(SessionId, _transcript.ToString());
+				_historyActive = true;
+				_record.Options = _options;
+				SaveUsage();
+			}
+			AddNotice($"--- {(resumeId is null ? "Session" : "Resumed")} {SessionId} | {_options.Model} | {_options.Mode} ---");
+			_isWorking = false;
+			StateChanged?.Invoke();
+			UsageChanged?.Invoke();
 		}
 		catch
 		{
-			await _client.DisposeAsync();
-			_client = null;
+			if (starting)
+				await CloseRuntimeAsync();
 			throw;
 		}
-
-		_session.On<SessionEvent>(HandleSessionEvent);
+		finally
+		{
+			_lifecycle.Release();
+		}
 	}
 
-	/// <summary>
-	/// Sends one prompt (plus any file attachments) to the session and marks
-	/// the turn working. Returns as soon as the runtime accepts the message;
-	/// the reply arrives through the events.
-	/// </summary>
 	public async Task SendAsync(string prompt, IReadOnlyList<string>? attachmentPaths = null, CancellationToken cancellationToken = default)
 	{
-		if (_session is null)
-			throw new InvalidOperationException("No active session.");
-
-		var text = UserPromptFilter?.Invoke(prompt) ?? prompt;
-
-		var message = new MessageOptions { Prompt = text };
-		if (attachmentPaths is { Count: > 0 })
-		{
-			message.Attachments = attachmentPaths.Select(BuildAttachment).ToList();
-		}
-
-		IsWorking = true;
+		using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
+		await _sending.WaitAsync(linked.Token);
 		try
 		{
-			await _session.SendAsync(message, cancellationToken);
+			var session = _session ?? throw new InvalidOperationException("No active session.");
+			if (HasPendingQuestion)
+			{
+				if (attachmentPaths is { Count: > 0 })
+					throw new InvalidOperationException("Answer the question without attachments. Remove them or press Stop to send a new prompt.");
+				if (TryAnswerPending(prompt))
+					return;
+			}
+			if (string.IsNullOrWhiteSpace(prompt) && attachmentPaths is not { Count: > 0 })
+				throw new ArgumentException("Enter a prompt or attach a file.", nameof(prompt));
+
+			var text = string.IsNullOrWhiteSpace(prompt) ? "Please review the attached files." : prompt;
+			var message = new MessageOptions
+			{
+				Prompt = UserPromptFilter?.Invoke(text) ?? text,
+				Mode = "immediate",
+				AgentMode = _agentMode,
+				Attachments = attachmentPaths?.Select(BuildAttachment).ToList(),
+			};
+			if (string.IsNullOrWhiteSpace(message.Prompt))
+				throw new InvalidOperationException("The prompt filter returned an empty prompt.");
+
+			if (_isWorking)
+			{
+				await InterruptAsync(session, linked.Token);
+				AddNotice("[interrupted] Previous turn stopped");
+			}
+			RecordUserInput(prompt);
+			if (attachmentPaths is { Count: > 0 })
+				AddNotice("[attached] " + string.Join(", ", attachmentPaths.Select(Path.GetFileName)));
+
+			var wasWorking = _isWorking;
+			lock (_sync)
+			{
+				_acceptQuestions = true;
+				_isWorking = true;
+				_turnIdle = new(TaskCreationOptions.RunContinuationsAsynchronously);
+			}
+			StateChanged?.Invoke();
+			try
+			{
+				await session.SendAsync(message, linked.Token);
+			}
+			catch
+			{
+				_isWorking = wasWorking;
+				_turnIdle?.TrySetResult();
+				StateChanged?.Invoke();
+				throw;
+			}
 		}
-		catch
+		finally
 		{
-			IsWorking = false;
-			throw;
+			_sending.Release();
 		}
 	}
 
-	/// <summary>
-	/// Aborts the turn in flight, if any, and releases any pending chat
-	/// question so the runtime's handler unblocks.
-	/// </summary>
 	public async Task AbortAsync()
 	{
-		ReleasePendingQuestion(canceled: true);
-
-		var session = _session;
-		if (session is null) return;
+		await _sending.WaitAsync(_lifetime.Token);
 		try
 		{
-			await session.AbortAsync();
+			if (_session is not { } session)
+			{
+				ReleaseQuestions();
+				return;
+			}
+			await InterruptAsync(session, _lifetime.Token);
+			AddNotice("[stopped] Turn interrupted");
+			StateChanged?.Invoke();
 		}
-		catch
+		finally
 		{
-			// Best effort: an abort on an already-idle session is a no-op
-			// that the runtime may report as an error.
+			_sending.Release();
 		}
 	}
 
-	public async ValueTask DisposeAsync()
+	private async Task InterruptAsync(CopilotSession session, CancellationToken cancellationToken)
 	{
-		ReleasePendingQuestion(canceled: true);
+		Task idle;
+		lock (_sync)
+		{
+			ReleaseQuestions();
+			if (!_isWorking)
+				return;
+			_turnIdle ??= new(TaskCreationOptions.RunContinuationsAsynchronously);
+			idle = _turnIdle.Task;
+		}
+		await session.AbortAsync(cancellationToken);
+		await idle.WaitAsync(TimeSpan.FromSeconds(15), cancellationToken);
+	}
 
+	public ValueTask DisposeAsync()
+	{
+		lock (_sync)
+			return new ValueTask(_disposeTask ??= DisposeCoreAsync());
+	}
+
+	private async Task DisposeCoreAsync()
+	{
+		Interlocked.Exchange(ref _disposeStarted, 1);
+		_lifetime.Cancel();
+		ReleaseQuestions();
+		await _lifecycle.WaitAsync();
+		await _sending.WaitAsync();
+		try
+		{
+			if (_session is { } session && _isWorking)
+			{
+				try { await session.AbortAsync(); }
+				catch (Exception ex) { ErrorReceived?.Invoke("Could not interrupt the ending turn: " + ex.Message); }
+			}
+			await CloseRuntimeAsync();
+			lock (_sync)
+			{
+				try { SaveUsage(); }
+				catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+				{
+					ErrorReceived?.Invoke("Could not save session metadata: " + ex.Message);
+				}
+			}
+			_isWorking = false;
+			_turnIdle?.TrySetResult();
+		}
+		finally
+		{
+			_sending.Release();
+			_lifecycle.Release();
+			_lifetime.Dispose();
+		}
+	}
+
+	private async Task CloseRuntimeAsync()
+	{
 		var session = _session;
 		_session = null;
 		if (session is not null)
 		{
-			try { await session.DisposeAsync(); } catch { }
+			try { await session.DisposeAsync(); }
+			catch (Exception ex) { ErrorReceived?.Invoke("Could not close the session: " + ex.Message); }
 		}
-
 		var client = _client;
 		_client = null;
 		if (client is not null)
 		{
-			try { await client.DisposeAsync(); } catch { }
+			try { await client.DisposeAsync(); }
+			catch (Exception ex) { ErrorReceived?.Invoke("Could not stop the runtime: " + ex.Message); }
 		}
 	}
 
-	// -- Answering questions ------------------------------------------------------
-
-	/// <summary>
-	/// Routes the user's next chat message to the pending question. Returns
-	/// false when nothing is waiting, meaning the message is a new prompt.
-	/// </summary>
 	public bool TryAnswerPending(string answer)
 	{
-		TaskCompletionSource<string>? tcs;
-		lock (_pendingLock)
-			tcs = _pendingAnswer;
-
-		if (tcs is null) return false;
-		tcs.TrySetResult(answer);
+		lock (_sync)
+		{
+			if (!_questions.TryPeek(out var question))
+				return false;
+			var response = ResolveAnswer(answer, question.Choices, question.AllowFreeform, question.IsPermission);
+			RecordUserInput(answer);
+			_questions.Dequeue();
+			if (_questions.TryPeek(out var next))
+				AddNotice(next.Text);
+			question.Completion.TrySetResult(response);
+		}
+		StateChanged?.Invoke();
 		return true;
 	}
 
-	private void ReleasePendingQuestion(bool canceled)
+	internal static UserInputResponse ResolveAnswer(string answer, IReadOnlyList<string> choices, bool allowFreeform, bool isPermission = false)
 	{
-		TaskCompletionSource<string>? tcs;
-		lock (_pendingLock)
+		var trimmed = answer.Trim();
+		if (isPermission)
 		{
-			tcs = _pendingAnswer;
-			_pendingAnswer = null;
+			trimmed = trimmed.TrimEnd('.', '!');
+			if (trimmed.Equals("y", StringComparison.OrdinalIgnoreCase)
+				|| trimmed.Equals("allow", StringComparison.OrdinalIgnoreCase)
+				|| trimmed.Equals("approve", StringComparison.OrdinalIgnoreCase))
+				trimmed = "yes";
+			if (trimmed.Equals("n", StringComparison.OrdinalIgnoreCase)
+				|| trimmed.Equals("deny", StringComparison.OrdinalIgnoreCase))
+				trimmed = "no";
 		}
-
-		if (tcs is null) return;
-		if (canceled) tcs.TrySetCanceled();
+		if (int.TryParse(trimmed, out var index) && index >= 1 && index <= choices.Count)
+			return new UserInputResponse { Answer = choices[index - 1], WasFreeform = false };
+		var choice = choices.FirstOrDefault(choice => choice.Equals(trimmed, StringComparison.OrdinalIgnoreCase));
+		if (choice is not null)
+			return new UserInputResponse { Answer = choice, WasFreeform = false };
+		if (allowFreeform && trimmed.Length > 0)
+			return new UserInputResponse { Answer = answer, WasFreeform = true };
+		throw new InvalidOperationException("Reply with a listed option number or its text.");
 	}
 
-	/// <summary>
-	/// Publishes a question and waits for the user's next chat message.
-	/// Throws OperationCanceledException when the turn is aborted first.
-	/// </summary>
-	private async Task<string> AwaitAnswerAsync(string questionText)
+	private Task<UserInputResponse> AwaitAnswerAsync(string text, IReadOnlyList<string> choices, bool allowFreeform, bool isPermission = false)
 	{
-		var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-		lock (_pendingLock)
-			_pendingAnswer = tcs;
-
-		QuestionReceived?.Invoke(questionText);
-
-		try
+		lock (_sync)
 		{
-			return await tcs.Task;
-		}
-		finally
-		{
-			lock (_pendingLock)
-			{
-				if (ReferenceEquals(_pendingAnswer, tcs))
-					_pendingAnswer = null;
-			}
+			if (!_acceptQuestions || _disposeStarted != 0)
+				return Task.FromCanceled<UserInputResponse>(new CancellationToken(canceled: true));
+			var question = new PendingQuestion(text, choices, allowFreeform, isPermission);
+			_questions.Enqueue(question);
+			if (_questions.Count == 1)
+				AddNotice(text);
+			StateChanged?.Invoke();
+			return question.Completion.Task;
 		}
 	}
 
-	private async Task<UserInputResponse> HandleUserInputRequestAsync(
-		UserInputRequest request, UserInputInvocation invocation)
+	private void ReleaseQuestions()
 	{
-		var text = FormatQuestion(request.Question ?? "", request.Choices, request.AllowFreeform ?? true);
-		string answer;
-		try
+		lock (_sync)
 		{
-			answer = await AwaitAnswerAsync(text);
+			_acceptQuestions = false;
+			while (_questions.TryDequeue(out var question))
+				question.Completion.TrySetCanceled();
 		}
+		StateChanged?.Invoke();
+	}
+
+	internal async Task<UserInputResponse> HandleUserInputRequestAsync(UserInputRequest request, UserInputInvocation invocation)
+	{
+		var choices = request.Choices?.ToArray() ?? [];
+		var allowFreeform = request.AllowFreeform ?? true;
+		if (choices.Length == 0 && !allowFreeform)
+			throw new InvalidOperationException("The runtime asked a question without any valid answers.");
+		var text = "Question: " + request.Question;
+		if (choices.Length > 0)
+			text += "\r\n" + string.Join("  |  ", choices.Select((choice, index) => $"{index + 1}. {choice}"));
+		text += allowFreeform
+			? "\r\n(Reply with an option number, its text, or your own answer and press Send.)"
+			: "\r\n(Reply with an option number or its text and press Send.)";
+		try { return await AwaitAnswerAsync(text, choices, allowFreeform); }
 		catch (OperationCanceledException)
 		{
-			answer = "(user cancelled)";
+			return new UserInputResponse { Answer = "(user canceled)", WasFreeform = true };
 		}
-
-		return new UserInputResponse { Answer = answer, WasFreeform = true };
 	}
 
-#pragma warning disable GHCP001 // PermissionDecision is an evaluation-stage API
-	private async Task<GitHub.Copilot.Rpc.PermissionDecision> HandlePermissionRequestAsync(
-		PermissionRequest request, PermissionInvocation invocation)
+	internal async Task<ExitPlanModeResult> HandleExitPlanModeRequestAsync(ExitPlanModeRequest request, ExitPlanModeInvocation invocation)
+	{
+		const string stay = "Stay in Plan";
+		var choices = request.Actions.Where(action => !string.IsNullOrWhiteSpace(action)).Distinct().ToList();
+		if (choices.Count == 0 && !string.IsNullOrWhiteSpace(request.RecommendedAction))
+			choices.Add(request.RecommendedAction);
+		choices.Add(stay);
+		var response = await HandleUserInputRequestAsync(new UserInputRequest
+		{
+			Question = request.Summary + (string.IsNullOrWhiteSpace(request.PlanContent) ? "" : "\r\n\r\n" + request.PlanContent),
+			Choices = choices,
+			AllowFreeform = false,
+		}, new UserInputInvocation { SessionId = invocation.SessionId });
+		var approved = response.Answer != stay && choices.Contains(response.Answer);
+		return new ExitPlanModeResult { Approved = approved, SelectedAction = approved ? response.Answer : null };
+	}
+
+	private async Task<AutoModeSwitchResponse> HandleAutoModeSwitchRequestAsync(AutoModeSwitchRequest request, AutoModeSwitchInvocation invocation)
+	{
+		var response = await HandleUserInputRequestAsync(new UserInputRequest
+		{
+			Question = "The selected model is rate-limited. Allow the runtime to choose a replacement?",
+			Choices = ["Switch once", "Always switch", "Keep this model"],
+			AllowFreeform = false,
+		}, new UserInputInvocation { SessionId = invocation.SessionId });
+		return response.Answer switch
+		{
+			"Switch once" => AutoModeSwitchResponse.Yes,
+			"Always switch" => AutoModeSwitchResponse.YesAlways,
+			_ => AutoModeSwitchResponse.No,
+		};
+	}
+
+#pragma warning disable GHCP001
+	private async Task<GitHub.Copilot.Rpc.PermissionDecision> HandlePermissionRequestAsync(PermissionRequest request, PermissionInvocation invocation)
 	{
 		var kind = request.Kind ?? "";
-
-		// Autopilot runs everything; otherwise the Permissions dialog
-		// decides, either by pre-approving the operation or by granting the
-		// folder a file request points at.
 		if (IsPreApproved(request, kind))
-		{
-			return await PermissionHandler.ApproveAll(request, invocation);
-		}
-
-		string answer;
-		try
-		{
-			answer = await AwaitAnswerAsync(FormatPermissionPrompt(request, kind));
-		}
-		catch (OperationCanceledException)
-		{
-			return GitHub.Copilot.Rpc.PermissionDecision.Reject(null);
-		}
-
-		if (IsYes(answer))
 			return await PermissionHandler.ApproveAll(request, invocation);
 
-		return GitHub.Copilot.Rpc.PermissionDecision.Reject(null);
-	}
-
-	/// <summary>
-	/// True when a request may run without asking: Autopilot is on, the
-	/// operation's toggle is pre-approved, or the target of a file request
-	/// is covered by a folder grant. Both rules read the store as it stands
-	/// at the moment of the request, which is what lets a change made in the
-	/// Permissions dialog answer the next request instead of waiting for a
-	/// new session.
-	/// </summary>
-	private bool IsPreApproved(PermissionRequest request, string kind)
-	{
-		if (_options.Mode == "Autopilot")
-			return true;
-
-		if (PermissionService.IsOperationAllowed(kind, _options.WorkspaceFolder))
-			return true;
-
-		string? path;
-		PermissionAccess access;
-		switch (request)
-		{
-			case PermissionRequestRead read:
-				path = read.Path;
-				access = PermissionAccess.Read;
-				break;
-			case PermissionRequestWrite write:
-				path = write.FileName;
-				access = PermissionAccess.Write;
-				break;
-			default:
-				return false;
-		}
-
-		return !string.IsNullOrWhiteSpace(path)
-			&& PermissionService.IsAllowed(path, access, _options.WorkspaceFolder);
-	}
-#pragma warning restore GHCP001
-
-	private static string FormatQuestion(string question, IList<string>? choices, bool allowFreeform)
-	{
-		var text = "Question: " + question;
-		if (choices is { Count: > 0 })
-			text += "\r\n" + string.Join("  |  ", choices.Select((c, i) => $"{i + 1}. {c}"));
-		if (allowFreeform)
-			text += "\r\n(Type your answer and press Send.)";
-		return text;
-	}
-
-	private static string FormatPermissionPrompt(PermissionRequest request, string kind)
-	{
 		var detail = request switch
 		{
 			PermissionRequestShell shell => shell.FullCommandText,
@@ -421,220 +470,242 @@ public sealed class ChatService : IAsyncDisposable
 			_ => null,
 		};
 		var label = string.IsNullOrWhiteSpace(detail) ? kind : $"{kind}: {detail}";
-		return $"Permission requested - {label}\r\nReply yes to allow or no to deny.";
-	}
-
-	private static bool IsYes(string answer)
-	{
-		var a = answer.Trim().TrimEnd('!', '.');
-		return a.Equals("yes", StringComparison.OrdinalIgnoreCase)
-			|| a.Equals("y", StringComparison.OrdinalIgnoreCase)
-			|| a.Equals("allow", StringComparison.OrdinalIgnoreCase)
-			|| a.Equals("approve", StringComparison.OrdinalIgnoreCase);
-	}
-
-	// -- Session events -----------------------------------------------------------
-
-	private void HandleSessionEvent(SessionEvent evt)
-	{
-		switch (evt)
-		{
-			case AssistantMessageDeltaEvent delta:
-				_turnDeltas++;
-				var piece = delta.Data.DeltaContent ?? "";
-				if (piece.Length > 0)
-					DeltaReceived?.Invoke(ModelOutputFilter?.Invoke(piece) ?? piece);
-				break;
-
-			case AssistantMessageEvent msg:
-				// With streaming on the deltas already carried the text; the
-				// final event only matters when nothing streamed.
-				if (_turnDeltas == 0 && !string.IsNullOrEmpty(msg.Data.Content))
-					DeltaReceived?.Invoke(ModelOutputFilter?.Invoke(msg.Data.Content) ?? msg.Data.Content);
-				break;
-
-			case ToolExecutionStartEvent tool:
-				StatusReceived?.Invoke($"[tool] {tool.Data.ToolName ?? "tool"}");
-				break;
-
-			case SessionErrorEvent error:
-				ErrorReceived?.Invoke(error.Data.Message ?? "Unknown error");
-				break;
-
-			case AssistantUsageEvent usage:
-				HandleUsage(usage.Data);
-				break;
-
-			case SessionIdleEvent:
-				IsWorking = false;
-				_turnDeltas = 0;
-				TurnIdle?.Invoke();
-				break;
-		}
-	}
-
-	private void HandleUsage(AssistantUsageData data)
-	{
-		// Credits accumulate across every call, sub-agents included.
-		if (data.CopilotUsage is { } usage && usage.TotalNanoAiu > 0)
-		{
-			_sessionAicNano += (long)usage.TotalNanoAiu;
-			UsageChanged?.Invoke();
-		}
-
-		// The context meter tracks the main user-driven call only: sub-agent
-		// and sampling calls report an initiator and are skipped. The schema
-		// says Initiator is absent for user calls; some models send "user".
-		if ((string.IsNullOrEmpty(data.Initiator)
-				|| string.Equals(data.Initiator, "user", StringComparison.OrdinalIgnoreCase))
-			&& data.InputTokens is { } input)
-		{
-			ContextUsedTokens = (int)input;
-			UsageChanged?.Invoke();
-		}
-	}
-
-	// -- Session config -------------------------------------------------------------
-
-	/// <summary>
-	/// Session id from the workspace leaf folder and the clock, e.g.
-	/// "MyApp-09-21-2026-101830". The CLI persists the transcript under this
-	/// id, which is what makes a session recallable.
-	/// </summary>
-	private static string GenerateSessionId(string? workspaceFolder)
-	{
-		var leaf = !string.IsNullOrWhiteSpace(workspaceFolder)
-			? new DirectoryInfo(workspaceFolder).Name
-			: "TurboPilot";
-		return $"{leaf}-{DateTime.Now:MM-dd-yyyy-HHmmss}";
-	}
-
-	/// <summary>
-	/// Appended directives for the session: a short identity line plus the
-	/// mode's behavior rule. Custom instructions and skills attach here when
-	/// the customization wiring is extended.
-	/// </summary>
-	private SystemMessageConfig? BuildSystemMessage()
-	{
-		var parts = new List<string>
-		{
-			"You are running inside TurboPilot, a retro desktop client. "
-				+ "The user sees your output as markdown in a terminal-styled transcript.",
-		};
-
-		switch (_options.Mode)
-		{
-			case "Plan":
-				parts.Add(
-					"PLAN MODE: Before taking any action, lay out a numbered step-by-step plan "
-						+ "and wait for the user to confirm before executing. Always show your reasoning.");
-				break;
-			case "Autopilot":
-				parts.Add(
-					"AUTOPILOT MODE: Work autonomously to complete the user's goal end-to-end. "
-						+ "Use all available tools without asking for confirmation at each step. "
-						+ "Summarize what you did when finished.");
-				break;
-		}
-
-		return new SystemMessageConfig
-		{
-			Content = string.Join("\n\n", parts),
-			Mode = SystemMessageMode.Append,
-		};
-	}
-
-	/// <summary>
-	/// BYOK sessions route the runtime's model calls to the configured
-	/// OpenAI-compatible server instead of the Copilot service. Null keeps
-	/// the CLI's own provider.
-	/// </summary>
-	private ProviderConfig? BuildProviderConfig()
-	{
-		if (!_options.UseByok || string.IsNullOrWhiteSpace(_options.ByokEndpoint))
-			return null;
-
-		var config = new ProviderConfig
-		{
-			Type = "openai",
-			WireApi = "completions",
-			Transport = "http",
-			BaseUrl = _options.ByokEndpoint.Trim(),
-			ApiKey = string.IsNullOrWhiteSpace(_options.ByokApiKey) ? "local" : _options.ByokApiKey.Trim(),
-			ModelId = _options.Model,
-		};
-
-		// Without the ceiling the runtime falls back to its own default
-		// limit, which throws off both the context meter and compaction.
-		if (ContextWindowTokens > 0)
-			config.MaxPromptTokens = ContextWindowTokens;
-
-		return config;
-	}
-
-	/// <summary>
-	/// Asks the running runtime for its model catalog and returns the
-	/// selected model's prompt window. Best effort: 0 when the model is not
-	/// listed or the call fails.
-	/// </summary>
-	private async Task<int> LookupContextWindowAsync(string modelId, CancellationToken cancellationToken)
-	{
-		if (_client is null || string.IsNullOrWhiteSpace(modelId)) return 0;
 		try
 		{
-			var models = await _client.ListModelsAsync(cancellationToken);
-			foreach (var m in models)
-			{
-				if (!string.Equals(m.Id, modelId, StringComparison.OrdinalIgnoreCase)) continue;
-				var limits = m.Capabilities?.Limits;
-				if (limits is null) return 0;
-				if (limits.MaxPromptTokens is { } maxPrompt) return (int)maxPrompt;
-				return limits.MaxContextWindowTokens > 0 ? (int)limits.MaxContextWindowTokens : 0;
-			}
+			var response = await AwaitAnswerAsync(
+				$"Permission requested - {label}\r\n1. yes (allow)  |  2. no (deny)\r\nReply with an option and press Send.",
+				["yes", "no"], allowFreeform: false, isPermission: true);
+			if (response.Answer == "yes")
+				return await PermissionHandler.ApproveAll(request, invocation);
 		}
-		catch
+		catch (OperationCanceledException)
 		{
-			// Catalog lookup is a nicety; the meter just stays blank.
+			// Ending a turn never grants its outstanding permission requests.
 		}
-		return 0;
+		return GitHub.Copilot.Rpc.PermissionDecision.Reject(null);
+	}
+#pragma warning restore GHCP001
+
+	private bool IsPreApproved(PermissionRequest request, string kind)
+	{
+		if (_agentMode == AgentMode.Autopilot || PermissionService.IsOperationAllowed(kind, _options.WorkspaceFolder))
+			return true;
+		var (path, access) = request switch
+		{
+			PermissionRequestRead read => (read.Path, PermissionAccess.Read),
+			PermissionRequestWrite write => (write.FileName, PermissionAccess.Write),
+			_ => ((string?)null, PermissionAccess.Read),
+		};
+		return !string.IsNullOrWhiteSpace(path) && PermissionService.IsAllowed(path, access, _options.WorkspaceFolder);
 	}
 
-	// -- Attachments ------------------------------------------------------------------
+	internal void HandleSessionEvent(SessionEvent evt)
+	{
+		if (_disposeStarted != 0 || (evt.AgentId is not null && evt is not AssistantUsageEvent))
+			return;
+		try
+		{
+			lock (_sync)
+			{
+				switch (evt)
+				{
+					case AssistantTurnStartEvent:
+						_isWorking = true;
+						if (_turnIdle is null || _turnIdle.Task.IsCompleted)
+							_turnIdle = new(TaskCreationOptions.RunContinuationsAsynchronously);
+						StateChanged?.Invoke();
+						break;
+					case AssistantMessageDeltaEvent delta when !string.IsNullOrEmpty(delta.Data.DeltaContent):
+						if (!_completedMessages.Contains(delta.Data.MessageId))
+						{
+							_streamedMessages.Add(delta.Data.MessageId);
+							EmitTranscript(ModelOutputFilter?.Invoke(delta.Data.DeltaContent) ?? delta.Data.DeltaContent);
+						}
+						break;
+					case AssistantMessageEvent message when _completedMessages.Add(message.Data.MessageId):
+						if (!_streamedMessages.Remove(message.Data.MessageId) && !string.IsNullOrEmpty(message.Data.Content))
+							EmitTranscript(ModelOutputFilter?.Invoke(message.Data.Content) ?? message.Data.Content);
+						EmitTranscript("\r\n\r\n");
+						break;
+					case ToolExecutionStartEvent tool:
+						AddNotice($"[tool] {tool.Data.ToolName}");
+						break;
+					case SessionMcpServerStatusChangedEvent server:
+						ReportServerStatus(server.Data.ServerName, server.Data.Status.Value, server.Data.Error);
+						break;
+					case SessionMcpServersLoadedEvent servers:
+						foreach (var server in servers.Data.Servers)
+							ReportServerStatus(server.Name, server.Status.Value, server.Error);
+						break;
+					case SessionErrorEvent error:
+						AddNotice("[error] " + error.Data.Message);
+						_isWorking = false;
+						_turnIdle?.TrySetResult();
+						ReleaseQuestions();
+						break;
+					case AssistantUsageEvent usage:
+						if (usage.Data.CopilotUsage is { TotalNanoAiu: > 0 } credits)
+							_sessionAicNano += (long)credits.TotalNanoAiu;
+						if ((string.IsNullOrEmpty(usage.Data.Initiator)
+								|| string.Equals(usage.Data.Initiator, "user", StringComparison.OrdinalIgnoreCase))
+							&& usage.Data.InputTokens is { } input)
+							ContextUsedTokens = TokenCount(input);
+						SaveUsage();
+						UsageChanged?.Invoke();
+						break;
+					case SessionUsageInfoEvent usage:
+						ContextUsedTokens = TokenCount(usage.Data.CurrentTokens);
+						if (usage.Data.TokenLimit > 0)
+							ContextWindowTokens = TokenCount(usage.Data.TokenLimit);
+						SaveUsage();
+						UsageChanged?.Invoke();
+						break;
+					case SessionModeChangedEvent mode when _session is not null:
+						_agentMode = mode.Data.NewMode == SessionMode.Plan ? AgentMode.Plan
+							: mode.Data.NewMode == SessionMode.Autopilot ? AgentMode.Autopilot : AgentMode.Interactive;
+						if (_options.Mode is "Standard" or "Plan" or "Autopilot")
+							_options = _options with { Mode = _agentMode == AgentMode.Interactive ? "Standard" : _agentMode.ToString() };
+						SaveUsage();
+						break;
+					case SessionModelChangeEvent model:
+						_options = _options with { Model = model.Data.NewModel };
+						SaveUsage();
+						UsageChanged?.Invoke();
+						break;
+					case SessionIdleEvent:
+						_isWorking = false;
+						_turnIdle?.TrySetResult();
+						_streamedMessages.Clear();
+						_completedMessages.Clear();
+						ReleaseQuestions();
+						SaveUsage();
+						break;
+				}
+			}
+		}
+		catch (Exception ex)
+		{
+			ErrorReceived?.Invoke("Could not process a session event: " + ex.Message);
+		}
+	}
 
-	/// <summary>
-	/// Builds the SDK attachment for a path. Images travel as base64 blobs
-	/// with their MIME type so the model actually sees the picture;
-	/// everything else travels as a path reference.
-	/// </summary>
+	public void AddNotice(string text) => EmitTranscript("\r\n" + text + "\r\n\r\n");
+
+	private void ReportServerStatus(string name, string status, string? error)
+	{
+		if (status is "failed" or "needs-auth")
+		{
+			if (_serverWarnings.Add(name))
+				AddNotice($"[error] MCP {name}: {error ?? status}");
+		}
+		else
+		{
+			_serverWarnings.Remove(name);
+		}
+	}
+
+	private void RecordUserInput(string prompt)
+	{
+		lock (_sync)
+		{
+			if (_record is not null && !string.IsNullOrWhiteSpace(prompt))
+			{
+				_record.Prompts.Add(prompt);
+				if (_record.Description.Length == 0)
+				{
+					var description = string.Join(" ", prompt.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+					_record.Description = description.Length > 160 ? description[..157] + "..." : description;
+				}
+				_store.Save(_record);
+			}
+			EmitTranscript($"\r\n**You:** {(string.IsNullOrWhiteSpace(prompt) ? "(attachments)" : prompt)}\r\n\r\n");
+		}
+	}
+
+	private void EmitTranscript(string text)
+	{
+		if (text.Length == 0)
+			return;
+		lock (_sync)
+		{
+			_transcript.Append(text);
+			if (_record is not null && _historyActive)
+			{
+				try
+				{
+					if (_transcriptWriteFailed)
+						_store.WriteTranscript(_record.SessionId, _transcript.ToString());
+					else
+						_store.AppendTranscript(_record.SessionId, text);
+					_transcriptWriteFailed = false;
+				}
+				catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+				{
+					if (!_transcriptWriteFailed)
+						ErrorReceived?.Invoke("Cannot save the transcript; it remains in memory: " + ex.Message);
+					_transcriptWriteFailed = true;
+				}
+			}
+			TranscriptReceived?.Invoke(text);
+		}
+	}
+
+	private void SaveUsage()
+	{
+		if (_record is null || !_historyActive)
+			return;
+		_record.Options = _options;
+		_record.UsesApiKey = _options.UseByok && !string.IsNullOrWhiteSpace(_options.ByokApiKey);
+		_record.ContextUsedTokens = ContextUsedTokens;
+		_record.ContextWindowTokens = ContextWindowTokens;
+		_record.AicNano = _sessionAicNano;
+		_store.Save(_record);
+		if (_transcriptWriteFailed)
+		{
+			_store.WriteTranscript(_record.SessionId, _transcript.ToString());
+			_transcriptWriteFailed = false;
+		}
+	}
+
+	private async Task<int> LookupContextWindowAsync(CancellationToken cancellationToken)
+	{
+		if (_client is null || string.IsNullOrWhiteSpace(_options.Model))
+			return 0;
+		try
+		{
+			if (_options.UseByok)
+			{
+				var models = await ModelService.QueryOpenAiCompatibleAsync(
+					_options.ByokEndpoint, _options.ByokApiKey, cancellationToken);
+				return models.FirstOrDefault(model => string.Equals(model.Id, _options.Model, StringComparison.OrdinalIgnoreCase))?.ContextWindowTokens ?? 0;
+			}
+			var catalog = await _client.ListModelsAsync(cancellationToken);
+			var limits = catalog.FirstOrDefault(model => string.Equals(model.Id, _options.Model, StringComparison.OrdinalIgnoreCase))?.Capabilities?.Limits;
+			return limits is null ? 0 : TokenCount(limits.MaxPromptTokens ?? limits.MaxContextWindowTokens);
+		}
+		catch (OperationCanceledException) { throw; }
+		catch (Exception ex)
+		{
+			AddNotice("[warning] Context window is unavailable: " + ex.Message);
+			return 0;
+		}
+	}
+
+	private static int TokenCount(long value) => (int)Math.Clamp(value, 0, int.MaxValue);
+
+	private static string GenerateSessionId(string? workspaceFolder)
+	{
+		var leaf = string.IsNullOrWhiteSpace(workspaceFolder) ? "TurboPilot" : new DirectoryInfo(workspaceFolder).Name;
+		var safeLeaf = new string(leaf.Take(50).Select(character =>
+			char.IsAsciiLetterOrDigit(character) || character is '-' or '_' ? character : '-').ToArray());
+		return $"{safeLeaf}-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}";
+	}
+
 	private static Attachment BuildAttachment(string path)
 	{
-		var mime = GetImageMimeType(path);
-		if (mime is not null && File.Exists(path))
-		{
-			try
-			{
-				return new AttachmentBlob
-				{
-					Data = Convert.ToBase64String(File.ReadAllBytes(path)),
-					DisplayName = Path.GetFileName(path),
-					MimeType = mime,
-				};
-			}
-			catch
-			{
-				// Unreadable image: fall through to a path reference.
-			}
-		}
-
-		return new AttachmentFile
-		{
-			Path = path,
-			DisplayName = Path.GetFileName(path),
-		};
-	}
-
-	private static string? GetImageMimeType(string path) =>
-		Path.GetExtension(path).ToLowerInvariant() switch
+		if (!File.Exists(path))
+			throw new FileNotFoundException("The attachment no longer exists.", path);
+		var mime = Path.GetExtension(path).ToLowerInvariant() switch
 		{
 			".png" => "image/png",
 			".jpg" or ".jpeg" => "image/jpeg",
@@ -643,4 +714,19 @@ public sealed class ChatService : IAsyncDisposable
 			".bmp" => "image/bmp",
 			_ => null,
 		};
+		return mime is not null
+			? new AttachmentBlob
+			{
+				Data = Convert.ToBase64String(File.ReadAllBytes(path)),
+				DisplayName = Path.GetFileName(path),
+				MimeType = mime,
+			}
+			: new AttachmentFile { Path = Path.GetFullPath(path), DisplayName = Path.GetFileName(path) };
+	}
+
+	private sealed record PendingQuestion(string Text, IReadOnlyList<string> Choices, bool AllowFreeform, bool IsPermission)
+	{
+		public TaskCompletionSource<UserInputResponse> Completion { get; } =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+	}
 }

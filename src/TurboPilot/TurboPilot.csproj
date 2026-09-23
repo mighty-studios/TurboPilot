@@ -46,6 +46,7 @@
 		     reference. -->
 		<PackageReference Include="Microsoft.AI.Foundry.Local.WinML" Version="1.2.4" />
 		<PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />
+		<PackageReference Include="YamlDotNet" Version="18.1.0" />
 	</ItemGroup>
 
 	<ItemGroup>

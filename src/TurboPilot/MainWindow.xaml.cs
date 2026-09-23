@@ -5,7 +5,10 @@ using System.Windows;
 using System.Windows.Media;
 using Microsoft.Web.WebView2.Wpf;
 using TurbolandTheme.Wpf.Controls;
+using TurboPilot.Ai;
+using TurboPilot.Customizations;
 using TurboPilot.Dialogs;
+using TurboPilot.Sessions;
 
 namespace TurboPilot;
 
@@ -25,6 +28,7 @@ public partial class MainWindow : TurbolandWindow
 	// this buffer, so a full re-sync is possible at any time (e.g. after
 	// the page (re)loads).
 	private readonly StringBuilder _outputText = new();
+	private readonly System.Windows.Documents.Run _rawOutputRun = new();
 
 	// Attachments tracking
 	private readonly List<string> _attachments = new();
@@ -36,6 +40,17 @@ public partial class MainWindow : TurbolandWindow
 
 	// The live AI session, or null between sessions.
 	private Ai.ChatService? _chat;
+	private readonly SessionStore _sessionStore;
+	private readonly Func<ChatService> _createChat;
+	private readonly Func<string?, CustomizationLibrary> _collectCustomizations;
+	private readonly string _webViewDataFolder;
+	private readonly SemaphoreSlim _sessionChange = new(1, 1);
+	private readonly HashSet<string> _historySessions = [];
+	private CancellationTokenSource? _startCancellation;
+	private bool _sessionChanging;
+	private bool _sendingInput;
+	private bool _closing;
+	private bool _closeApproved;
 
 	// Model id and session id of the live session, shown in the
 	// sessionInfo badge. Both null while no session is running.
@@ -50,8 +65,18 @@ public partial class MainWindow : TurbolandWindow
 	private double _aic;
 	private bool _showAic;
 
-	public MainWindow()
+	public MainWindow() : this(new SessionStore())
 	{
+	}
+
+	internal MainWindow(SessionStore sessionStore, Func<ChatService>? createChat = null,
+		Func<string?, CustomizationLibrary>? collectCustomizations = null, string? webViewDataFolder = null)
+	{
+		_sessionStore = sessionStore;
+		_createChat = createChat ?? (() => new ChatService(_sessionStore));
+		_collectCustomizations = collectCustomizations ?? CustomizationService.Rescan;
+		_webViewDataFolder = webViewDataFolder ?? System.IO.Path.Combine(
+			Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TurboPilot", "webview2-default");
 		InitializeComponent();
 
 		// The Raw tab reads its face and ink from the same palette table the
@@ -61,6 +86,8 @@ public partial class MainWindow : TurbolandWindow
 		richTextBoxOutput.Background = new SolidColorBrush(BorlandVisionTheme.RawBackgroundColor);
 		richTextBoxOutput.Foreground = new SolidColorBrush(BorlandVisionTheme.RawForegroundColor);
 		richTextBoxOutput.FontSize = BorlandVisionTheme.RawFontSize;
+		richTextBoxOutput.Document.Blocks.Clear();
+		richTextBoxOutput.Document.Blocks.Add(new System.Windows.Documents.Paragraph(_rawOutputRun));
 
 		// Paint the WebView2 surface with the desktop blue before any
 		// stylesheet lands, so there is no white flash on first show.
@@ -115,18 +142,22 @@ public partial class MainWindow : TurbolandWindow
 		if (!active)
 			ActiveWorkspacePath = null;
 
-		menuTools.IsEnabled = active;
-		menuEndSession.IsEnabled = active;
+		var ready = active && !_sessionChanging && !_closing;
+		menuTools.IsEnabled = ready;
+		menuEndSession.IsEnabled = (active || _sessionChanging) && !_closing;
+		menuNewSession.IsEnabled = !_sessionChanging && !_closing;
+		menuPastSessions.IsEnabled = !_sessionChanging && !_closing;
+		menuSettings.IsEnabled = !_sessionChanging && !_closing;
 
-		richTextBoxInput.IsEnabled = active;
+		richTextBoxInput.IsEnabled = ready;
 		UpdateHistoryButtons();
 
-		buttonAttachments.IsEnabled = active;
-		buttonStop.IsEnabled = active;
-		buttonSend.IsEnabled = active;
+		buttonAttachments.IsEnabled = ready && !_sendingInput;
+		buttonStop.IsEnabled = ready && _chat is not null && (_chat.IsWorking || _chat.HasPendingQuestion);
+		buttonSend.IsEnabled = ready && !_sendingInput;
 
 		// The prompt box only accepts typing while a session is running.
-		richTextBoxInput.IsReadOnly = !active;
+		richTextBoxInput.IsReadOnly = !ready;
 
 		UpdateStatus();
 		UpdateSessionInfo();
@@ -206,13 +237,11 @@ public partial class MainWindow : TurbolandWindow
 	{
 		try
 		{
-			var userDataFolder = System.IO.Path.Combine(
-				System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData),
-				"TurboPilot", "webview2-default");
-			System.IO.Directory.CreateDirectory(userDataFolder);
+			System.IO.Directory.CreateDirectory(_webViewDataFolder);
 
 			var env = await Microsoft.Web.WebView2.Core.CoreWebView2Environment
-				.CreateAsync(null, userDataFolder);
+				.CreateAsync(null, _webViewDataFolder);
+			if (_closing) return;
 			await webViewOutput.EnsureCoreWebView2Async(env);
 
 			// ── Lock down the WebView2 so it behaves as a pure display
@@ -257,13 +286,16 @@ public partial class MainWindow : TurbolandWindow
 			}
 			else
 			{
-				// Fall back to Raw tab if assets are missing
-				// (TabControl may not have tabPageRaw yet — best effort)
+				throw new System.IO.FileNotFoundException("The rendered output page is missing.", htmlPath);
 			}
 		}
-		catch
+		catch (Exception ex)
 		{
-			// WebView2 runtime not available — fall back to Raw tab
+			if (!_closing)
+			{
+				AppendOutput($"\r\n[error] Rendered output is unavailable: {ex.Message}\r\n");
+				outputTabs.SelectedIndex = 1;
+			}
 		}
 	}
 
@@ -412,7 +444,16 @@ public partial class MainWindow : TurbolandWindow
 		object? sender,
 		Microsoft.Web.WebView2.Core.CoreWebView2NavigationCompletedEventArgs e)
 	{
-		if (_outputHtmlUri == null) return;
+		if (_outputHtmlUri == null || _closing) return;
+		if (!e.IsSuccess)
+		{
+			if (e.WebErrorStatus == Microsoft.Web.WebView2.Core.CoreWebView2WebErrorStatus.OperationCanceled)
+				return;
+			_webViewReady = false;
+			AppendOutput($"\r\n[error] Rendered output failed to load: {e.WebErrorStatus}\r\n");
+			outputTabs.SelectedIndex = 1;
+			return;
+		}
 
 		var currentUri = webViewOutput.CoreWebView2.Source;
 		if (currentUri != null
@@ -522,7 +563,10 @@ public partial class MainWindow : TurbolandWindow
 		}
 
 		_outputText.Append(text);
-		richTextBoxOutput.AppendText(text);
+		// Range-based appends normalize paragraph boundaries between chunks.
+		_rawOutputRun.ContentEnd.InsertTextInRun(text);
+		richTextBoxOutput.CaretPosition = _rawOutputRun.ContentEnd;
+		richTextBoxOutput.ScrollToEnd();
 		PushToRenderer($"appendTranscript({JsString(text)})");
 	}
 
@@ -539,7 +583,7 @@ public partial class MainWindow : TurbolandWindow
 		}
 
 		_outputText.Clear();
-		richTextBoxOutput.Document.Blocks.Clear();
+		_rawOutputRun.Text = "";
 		PushToRenderer("clearAll()");
 	}
 
@@ -636,8 +680,9 @@ public partial class MainWindow : TurbolandWindow
 	/// </summary>
 	private void UpdateHistoryButtons()
 	{
-		buttonHistoryPrev.IsEnabled = IsSessionActive && _promptHistory.CanGoBack;
-		buttonHistoryNext.IsEnabled = IsSessionActive && _promptHistory.CanGoForward;
+		var enabled = IsSessionActive && !_sessionChanging && !_closing && !_sendingInput;
+		buttonHistoryPrev.IsEnabled = enabled && _promptHistory.CanGoBack;
+		buttonHistoryNext.IsEnabled = enabled && _promptHistory.CanGoForward;
 	}
 
 	/// <summary>
@@ -659,38 +704,54 @@ public partial class MainWindow : TurbolandWindow
 	/// <summary>
 	/// Opens the Session Settings dialog from New Session.
 	/// </summary>
-	private void OnNewSession(object sender, RoutedEventArgs e) => OpenSettingsDialog();
+	private async void OnNewSession(object sender, RoutedEventArgs e) => await OpenSettingsDialogAsync();
 
 	/// <summary>
 	/// Opens the Session Settings dialog from the menu.
 	/// </summary>
-	private void OnSettings(object sender, RoutedEventArgs e) => OpenSettingsDialog();
+	private async void OnSettings(object sender, RoutedEventArgs e) => await OpenSettingsDialogAsync();
 
 	/// <summary>
 	/// Shows the Session Settings dialog. Begin Session brings the
 	/// session-dependent controls online, refreshes the customization
-	/// lists for the new workspace and starts the Copilot SDK session
+	/// lists for the new workspace and starts the streaming session
 	/// with the gathered options. Ending a session is the Session menu's
 	/// End Session item.
 	/// </summary>
-	private void OpenSettingsDialog()
+	private async Task OpenSettingsDialogAsync()
 	{
-		var dialog = new Dialogs.SettingsDialog(ActiveWorkspacePath, IsSessionActive);
-		dialog.ShowDialog(this);
-
-		if (dialog.BeginRequested && !string.IsNullOrEmpty(dialog.WorkspacePath))
+		try
 		{
-			SetSessionActive(true);
-			ActiveWorkspacePath = dialog.WorkspacePath;
-			Customizations.CustomizationService.Rescan(dialog.WorkspacePath);
-			_ = StartChatAsync(dialog);
+			var dialog = new Dialogs.SettingsDialog(ActiveWorkspacePath, IsSessionActive);
+			dialog.ShowDialog(this);
+
+			if (dialog.BeginRequested && !string.IsNullOrEmpty(dialog.WorkspacePath))
+			{
+				await StartChatAsync(new ChatSessionOptions
+				{
+					WorkspaceFolder = dialog.WorkspacePath,
+					Model = dialog.SelectedModel,
+					ReasoningEffort = dialog.SelectedEffort,
+					Mode = dialog.SelectedMode,
+					ContextWindowTokens = dialog.SelectedContextWindowTokens,
+					UseByok = dialog.Provider == "Byok",
+					ByokEndpoint = dialog.ByokEndpoint,
+					ByokApiKey = dialog.ByokApiKey,
+					ApplyInstructions = dialog.ApplyInstructions,
+					PreloadSkills = dialog.PreloadSkills,
+				});
+			}
+		}
+		catch (Exception ex)
+		{
+			AppendOutput($"\r\n[error] Cannot open session settings: {ex.Message}\r\n\r\n");
 		}
 	}
 
 	/// <summary>
 	/// Session menu: ends the active session.
 	/// </summary>
-	private void OnEndSessionClick(object sender, RoutedEventArgs e) => EndSession();
+	private async void OnEndSessionClick(object sender, RoutedEventArgs e) => await EndSessionAsync();
 
 	/// <summary>
 	/// Ends the active session: disposes the SDK session, gates the
@@ -698,111 +759,186 @@ public partial class MainWindow : TurbolandWindow
 	/// scope. Session history and settings persist; only the live
 	/// session state goes away.
 	/// </summary>
-	public void EndSession()
+	public async Task EndSessionAsync()
 	{
-		var chat = _chat;
+		_startCancellation?.Cancel();
+		await _sessionChange.WaitAsync();
+		_sessionChanging = true;
+		SetSessionActive(IsSessionActive);
+		try
+		{
+			await EndChatCoreAsync();
+		}
+		finally
+		{
+			_sessionChanging = false;
+			SetSessionActive(false);
+			_sessionChange.Release();
+		}
+	}
+
+	private async Task EndChatCoreAsync()
+	{
+		if (_chat is { } chat)
+			await chat.DisposeAsync();
 		_chat = null;
 		_sessionModel = null;
 		_sessionId = null;
-		if (chat is not null)
-			_ = chat.DisposeAsync().AsTask();
-
 		_ctxTotal = 0;
 		_ctxUsed = 0;
 		_aic = 0;
 		_showAic = false;
-
 		SetSessionActive(false);
 	}
 
 	// -- Chat round-trip ---------------------------------------------------------
 
 	/// <summary>
-	/// Starts the Copilot SDK session described by the settings dialog and
+	/// Starts the session described by the settings dialog and
 	/// wires its events into the transcript and the status line. A failed
 	/// start is reported in the transcript and drops back to no session.
 	/// </summary>
-	private async Task StartChatAsync(Dialogs.SettingsDialog dialog)
+	private async Task StartChatAsync(ChatSessionOptions options, string? resumeId = null)
 	{
-		var previous = _chat;
-		_chat = null;
-		_sessionModel = null;
-		_sessionId = null;
-		UpdateSessionInfo();
-		if (previous is not null)
-			await previous.DisposeAsync();
-
-		_statusBase = "Starting..";
-		_ctxUsed = 0;
-		_ctxTotal = 0;
-		_aic = 0;
-		// Credits only exist against the Copilot service; a BYOK server
-		// has no meter to read.
-		_showAic = dialog.Provider != "Byok";
-		UpdateStatus();
-
-		var chat = new Ai.ChatService();
-		chat.DeltaReceived += AppendOutput;
-		chat.StatusReceived += line => AppendOutput($"\r\n{line}\r\n");
-		chat.ErrorReceived += line => AppendOutput($"\r\n[error] {line}\r\n");
-		chat.QuestionReceived += text =>
-		{
-			AppendOutput($"\r\n{text}\r\n\r\n");
-			SetStatusBase("Waiting..");
-		};
-		chat.TurnIdle += () => SetStatusBase("Ready..");
-		chat.UsageChanged += () => Dispatcher.BeginInvoke(() =>
-		{
-			_ctxUsed = chat.ContextUsedTokens;
-			_aic = chat.AicUsed;
-			UpdateStatus();
-		});
-
+		await _sessionChange.WaitAsync();
+		using var cancellation = new CancellationTokenSource();
+		_startCancellation = cancellation;
+		_sessionChanging = true;
+		SetSessionActive(IsSessionActive);
 		try
 		{
-			await chat.StartAsync(new Ai.ChatSessionOptions
+			options = options with
 			{
-				WorkspaceFolder = dialog.WorkspacePath,
-				Model = dialog.SelectedModel,
-				ReasoningEffort = string.IsNullOrEmpty(dialog.SelectedEffort) ? null : dialog.SelectedEffort,
-				Mode = dialog.SelectedMode,
-				ContextWindowTokens = dialog.SelectedContextWindowTokens,
-				UseByok = dialog.Provider == "Byok",
-				ByokEndpoint = dialog.ByokEndpoint,
-				ByokApiKey = dialog.ByokApiKey,
+				Customizations = _collectCustomizations(options.WorkspaceFolder).Clone(),
+			};
+			await EndChatCoreAsync();
+			cancellation.Token.ThrowIfCancellationRequested();
+
+			var chat = _createChat();
+			_chat = chat;
+			chat.TranscriptReceived += text => ForActiveChat(chat, () => AppendOutput(text));
+			chat.ErrorReceived += text => ForActiveChat(chat, () => AppendOutput($"\r\n[error] {text}\r\n\r\n"));
+			chat.StateChanged += () => ForActiveChat(chat, RefreshChatState);
+			chat.UsageChanged += () => ForActiveChat(chat, () =>
+			{
+				_ctxUsed = chat.ContextUsedTokens;
+				_ctxTotal = chat.ContextWindowTokens;
+				_aic = chat.AicUsed;
+				_sessionModel = chat.Model;
+				UpdateSessionInfo();
+				UpdateStatus();
 			});
+
+			ClearOutput();
+			_statusBase = "Starting..";
+			_sessionModel = options.Model;
+			_ctxTotal = options.ContextWindowTokens;
+			_showAic = !options.UseByok;
+			ActiveWorkspacePath = options.WorkspaceFolder;
+			SetSessionActive(true);
+
+			if (resumeId is null)
+				await chat.StartAsync(options, cancellation.Token);
+			else
+				await chat.ResumeAsync(resumeId, options, cancellation.Token);
+
+			cancellation.Token.ThrowIfCancellationRequested();
+			_sessionId = chat.SessionId ?? throw new InvalidOperationException("The runtime did not return a session ID.");
+			if (_historySessions.Add(_sessionId) && resumeId is not null && chat.Record is { } saved)
+			{
+				foreach (var prompt in saved.Prompts)
+					_promptHistory.Add(prompt);
+			}
+			_ctxTotal = chat.ContextWindowTokens;
+			_ctxUsed = chat.ContextUsedTokens;
+			_aic = chat.AicUsed;
+			_sessionModel = chat.Model;
+		}
+		catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+		{
+			await EndChatCoreAsync();
 		}
 		catch (Exception ex)
 		{
-			await chat.DisposeAsync();
 			AppendOutput($"\r\n[error] Session start failed: {ex.Message}\r\n\r\n");
-			EndSession();
-			return;
+			await EndChatCoreAsync();
 		}
-
-		_chat = chat;
-		_sessionModel = dialog.SelectedModel;
-		_sessionId = chat.SessionId;
-		_ctxTotal = chat.ContextWindowTokens;
-		UpdateSessionInfo();
-		AppendOutput($"\r\n--- Session {chat.SessionId} | {dialog.SelectedModel} | {dialog.SelectedMode} ---\r\n\r\n");
-		SetStatusBase("Ready..");
+		finally
+		{
+			_startCancellation = null;
+			_sessionChanging = false;
+			RefreshChatState();
+			_sessionChange.Release();
+		}
 	}
 
-	/// <summary>
-	/// Sets the status base phrase and repaints the status line. Safe to
-	/// call from SDK event threads.
-	/// </summary>
-	private void SetStatusBase(string text)
+	private void ForActiveChat(ChatService chat, Action action)
 	{
 		if (!Dispatcher.CheckAccess())
 		{
-			Dispatcher.BeginInvoke(new Action<string>(SetStatusBase), text);
+			Dispatcher.BeginInvoke(new Action(() => ForActiveChat(chat, action)));
 			return;
 		}
+		if (ReferenceEquals(_chat, chat))
+			action();
+	}
 
-		_statusBase = text;
-		UpdateStatus();
+	private void RefreshChatState()
+	{
+		_statusBase = _sessionChanging ? "Starting.."
+			: _chat?.HasPendingQuestion == true ? "Waiting.."
+			: _chat?.IsWorking == true ? "Working.." : "Ready..";
+		SetSessionActive(_chat is not null);
+	}
+
+	private async void OnPastSessions(object sender, RoutedEventArgs e)
+	{
+		try
+		{
+			var sessions = _sessionStore.List(out var errors);
+			if (errors.Count > 0)
+				MessageDialog.Ok(this, string.Join("\r\n", errors), "Saved session errors");
+			if (sessions.Count == 0)
+			{
+				MessageDialog.Ok(this, "No saved sessions yet.", "Past Sessions");
+				return;
+			}
+
+			var dialog = new PastSessionsDialog(sessions);
+			if (dialog.ShowDialog(this) != true || dialog.SelectedSession is not { } selected)
+				return;
+			if (IsSessionActive && !YesNoDialog.Ask(this,
+				"Open this saved session? The current session will end.", "Past Sessions"))
+				return;
+
+			if (!dialog.ResumeRequested)
+			{
+				await EndSessionAsync();
+				var transcript = _sessionStore.ReadTranscript(selected.SessionId);
+				ClearOutput();
+				AppendOutput(transcript);
+				return;
+			}
+
+			var options = RestoreSessionOptions(selected, Settings.Load());
+			await StartChatAsync(options, selected.SessionId);
+		}
+		catch (Exception ex)
+		{
+			AppendOutput($"\r\n[error] Cannot open saved session: {ex.Message}\r\n\r\n");
+		}
+	}
+
+	internal static ChatSessionOptions RestoreSessionOptions(SessionRecord saved, Settings settings)
+	{
+		var options = saved.Options;
+		if (!options.UseByok)
+			return options;
+		var matchingEndpoint = string.Equals(options.ByokEndpoint.TrimEnd('/'),
+			settings.ByokEndpoint?.TrimEnd('/'), StringComparison.Ordinal);
+		if (saved.UsesApiKey && (!matchingEndpoint || string.IsNullOrWhiteSpace(settings.ByokApiKey)))
+			throw new InvalidOperationException("Set the saved provider endpoint and its API key in Settings before resuming this session.");
+		return options with { ByokApiKey = matchingEndpoint ? settings.ByokApiKey ?? "" : "" };
 	}
 
 	/// <summary>
@@ -818,12 +954,16 @@ public partial class MainWindow : TurbolandWindow
 			return;
 		}
 
-		var text = _statusBase;
-		if (_ctxTotal > 0)
-			text += $" {_ctxUsed / 1024}/{_ctxTotal / 1024}K";
-		if (_showAic)
-			text += $" AiC={_aic:0}";
-		statusTextBlock.Text = text;
+		statusTextBlock.Text = FormatStatus(_statusBase, _ctxUsed, _ctxTotal, _aic, _showAic);
+	}
+
+	internal static string FormatStatus(string status, int used, int total, double credits, bool showCredits)
+	{
+		if (total > 0)
+			status += $" {used / 1024}/{total / 1024}K";
+		if (showCredits)
+			status += $" AiC={credits:0}";
+		return status;
 	}
 
 	/// <summary>
@@ -844,9 +984,12 @@ public partial class MainWindow : TurbolandWindow
 		var chat = _chat;
 		if (chat is null) return;
 
-		await chat.AbortAsync();
-		AppendOutput("\r\n[stopped] Turn interrupted\r\n\r\n");
-		SetStatusBase("Ready..");
+		try { await chat.AbortAsync(); }
+		catch (Exception ex)
+		{
+			ForActiveChat(chat, () => chat.AddNotice("[error] Stop failed: " + ex.Message));
+		}
+		ForActiveChat(chat, RefreshChatState);
 	}
 
 	/// <summary>
@@ -859,7 +1002,7 @@ public partial class MainWindow : TurbolandWindow
 	private async Task SendCurrentInputAsync()
 	{
 		var chat = _chat;
-		if (chat is null) return;
+		if (chat is null || _sessionChanging || _sendingInput || _closing) return;
 
 		var text = GetInputText();
 		if (string.IsNullOrWhiteSpace(text) && _attachments.Count == 0) return;
@@ -872,53 +1015,31 @@ public partial class MainWindow : TurbolandWindow
 			UpdateHistoryButtons();
 		}
 
-		richTextBoxInput.Document.Blocks.Clear();
-
-		// The next message answers an outstanding question (model question
-		// or permission prompt) instead of starting a new turn.
-		if (chat.HasPendingQuestion)
-		{
-			AppendOutput($"\r\n**You:** {text}\r\n\r\n");
-			chat.TryAnswerPending(text);
-			SetStatusBase("Working..");
-			return;
-		}
-
-		if (string.IsNullOrWhiteSpace(text)) return;
-
-		if (chat.IsWorking)
-		{
-			await chat.AbortAsync();
-			// Give the runtime's idle event a moment to land so the new
-			// turn's Working status is not clobbered by the old turn's
-			// idle. The cap keeps a missed event from wedging the send.
-			var sw = Stopwatch.StartNew();
-			while (chat.IsWorking && sw.ElapsedMilliseconds < 1500)
-				await Task.Delay(50);
-		}
-
 		var attachments = _attachments.ToArray();
-		_attachments.Clear();
-		UpdateAttachmentButton();
-
-		AppendOutput($"\r\n**You:** {text}\r\n\r\n");
-
-		// Name the attachments in the transcript so the record shows what
-		// actually left with the prompt.
-		if (attachments.Length > 0)
-		{
-			var names = attachments.Select(System.IO.Path.GetFileName);
-			AppendOutput($"[attached] {string.Join(", ", names)}\r\n\r\n");
-		}
-
+		_sendingInput = true;
+		SetSessionActive(IsSessionActive);
 		try
 		{
 			await chat.SendAsync(text, attachments);
-			SetStatusBase("Working..");
+			if (ReferenceEquals(_chat, chat))
+			{
+				if (GetInputText() == text)
+					richTextBoxInput.Document.Blocks.Clear();
+				_attachments.Clear();
+				UpdateAttachmentButton();
+			}
+		}
+		catch (OperationCanceledException) when (_sessionChanging || _closing || !ReferenceEquals(_chat, chat))
+		{
 		}
 		catch (Exception ex)
 		{
-			AppendOutput($"\r\n[error] Send failed: {ex.Message}\r\n\r\n");
+			ForActiveChat(chat, () => chat.AddNotice("[error] Send failed: " + ex.Message));
+		}
+		finally
+		{
+			_sendingInput = false;
+			RefreshChatState();
 		}
 	}
 
@@ -979,10 +1100,17 @@ public partial class MainWindow : TurbolandWindow
 	/// so one guard covers both. The program quits only on an explicit Yes;
 	/// No, Escape and the question's own close box all leave it running.
 	/// </summary>
-	private void OnWindowClosing(object? sender, System.ComponentModel.CancelEventArgs e)
+	private async void OnWindowClosing(object? sender, System.ComponentModel.CancelEventArgs e)
 	{
-		if (!Dialogs.YesNoDialog.Ask(this, "Exit the Program?"))
-			e.Cancel = true;
+		if (_closeApproved)
+			return;
+		e.Cancel = true;
+		if (_closing || !Dialogs.YesNoDialog.Ask(this, "Exit the Program?"))
+			return;
+		_closing = true;
+		await EndSessionAsync();
+		_closeApproved = true;
+		Close();
 	}
 
 	/// <summary>
@@ -990,4 +1118,10 @@ public partial class MainWindow : TurbolandWindow
 	/// two paths cannot drift apart.
 	/// </summary>
 	private void OnExitClick(object sender, RoutedEventArgs e) => Close();
+
+	protected override void OnClosed(EventArgs e)
+	{
+		webViewOutput.Dispose();
+		base.OnClosed(e);
+	}
 }

@@ -110,7 +110,11 @@ public partial class SettingsDialog : TurbolandFloatingDialog
 		UpdateServiceFields();
 		UpdateEndpointPreview();
 
-		textBoxWorkspacePath.TextChanged += (_, _) => UpdateBeginEnabled();
+		textBoxWorkspacePath.TextChanged += (_, _) =>
+		{
+			UpdateBeginEnabled();
+			PopulateModes(comboMode.SelectedItem as string ?? "Standard");
+		};
 
 		// Contact the configured service as soon as the dialog is up so the
 		// model list is populated without an extra click.
@@ -289,7 +293,10 @@ public partial class SettingsDialog : TurbolandFloatingDialog
 	private void PopulateModes(string preferred)
 	{
 		var modes = new List<string> { "Standard", "Plan", "Autopilot" };
-		modes.AddRange(Customizations.CustomizationService.Current.Agents.Values
+		var library = Customizations.CustomizationService.Preview(
+			ValidatedWorkspacePath(), Settings.Load().CustomizationFolders,
+			Customizations.CustomizationService.Current);
+		modes.AddRange(library.Agents.Values
 			.Where(a => a.Enabled)
 			.Select(a => a.Name)
 			.OrderBy(n => n, StringComparer.OrdinalIgnoreCase));

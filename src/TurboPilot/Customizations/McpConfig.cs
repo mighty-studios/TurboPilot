@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.Json;
+using GitHub.Copilot;
 
 namespace TurboPilot.Customizations;
 
@@ -12,6 +13,37 @@ namespace TurboPilot.Customizations;
 /// </summary>
 public static class McpConfig
 {
+	internal static McpServerConfig ReadServerConfiguration(string filePath, string serverName)
+	{
+		using var document = JsonDocument.Parse(File.ReadAllText(filePath));
+		if ((!TryGetObject(document.RootElement, "mcpServers", out var servers)
+				&& !TryGetObject(document.RootElement, "servers", out servers))
+			|| !servers.TryGetProperty(serverName, out var server)
+			|| server.ValueKind != JsonValueKind.Object)
+			throw new InvalidDataException($"Server '{serverName}' was not found in '{filePath}'.");
+
+		var type = server.TryGetProperty("type", out var typeValue)
+			? typeValue.GetString()?.ToLowerInvariant()
+			: server.TryGetProperty("command", out _) ? "stdio" : "http";
+		var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+		McpServerConfig config = type switch
+		{
+			"stdio" or "local" => server.Deserialize<McpStdioServerConfig>(options)
+				?? throw new InvalidDataException($"Invalid server '{serverName}'."),
+			"http" or "sse" => server.Deserialize<McpHttpServerConfig>(options)
+				?? throw new InvalidDataException($"Invalid server '{serverName}'."),
+			_ => throw new InvalidDataException($"Unsupported server type for '{serverName}' in '{filePath}'."),
+		};
+
+		if (config is McpStdioServerConfig local && string.IsNullOrWhiteSpace(local.Command))
+			throw new InvalidDataException($"Server '{serverName}' needs a command.");
+		if (config is McpHttpServerConfig remote
+			&& (!Uri.TryCreate(remote.Url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https")))
+			throw new InvalidDataException($"Server '{serverName}' needs an HTTP or HTTPS URL.");
+		config.Tools ??= ["*"];
+		return config;
+	}
+
 	/// <summary>
 	/// Returns the server names declared in a file, in document order.
 	/// </summary>

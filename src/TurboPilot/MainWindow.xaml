@@ -61,10 +61,10 @@
 
         <Menu DockPanel.Dock="Top">
             <MenuItem Header="_Session">
-                <MenuItem Header="_New Session..." Click="OnNewSession"/>
-                <MenuItem Header="_Past Sessions..."/>
+                <MenuItem x:Name="menuNewSession" Header="_New Session..." Click="OnNewSession"/>
+                <MenuItem x:Name="menuPastSessions" Header="_Past Sessions..." Click="OnPastSessions"/>
                 <Separator/>
-                <MenuItem Header="Set_tings..." Click="OnSettings"/>
+                <MenuItem x:Name="menuSettings" Header="Set_tings..." Click="OnSettings"/>
                 <MenuItem Header="C_ustomization..." Click="OnCustomization"/>
                 <MenuItem Header="Pe_rmissions..." Click="OnPermissions"/>
                 <Separator/>
@@ -120,7 +120,7 @@
             <!-- Padding 0: the theme's default TabControl padding (9,0) lets
                  the gray page background show as bars on the left and right
                  of the tab content. -->
-            <TabControl Grid.Row="0" Margin="4,10,4,4" Padding="2">
+            <TabControl x:Name="outputTabs" Grid.Row="0" Margin="4,10,4,4" Padding="2">
                 <TabItem Header="Rendered">
                     <Grid>
                         <Grid.ColumnDefinitions>

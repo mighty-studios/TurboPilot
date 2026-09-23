@@ -1,13 +1,12 @@
 using System.IO;
+using System.Text;
+using YamlDotNet.Core;
+using YamlDotNet.RepresentationModel;
 
 namespace TurboPilot.Customizations;
 
 /// <summary>
-/// Minimal YAML front matter reader for the leading block delimited by
-/// --- lines, the convention shared by prompts, skills and instructions.
-/// Only top-level scalar key: value pairs are returned; nested structures,
-/// lists and multiline values are not interpreted. Read failures yield an
-/// empty result so the details pane degrades to file info alone.
+/// Reads YAML headers and separates them from the markdown body.
 /// </summary>
 public static class FrontMatter
 {
@@ -23,31 +22,16 @@ public static class FrontMatter
 	{
 		try
 		{
-			using var reader = new StreamReader(filePath);
-
-			string? first = reader.ReadLine();
-			if (first?.Trim().TrimStart('\uFEFF') != "---")
-				return Empty;
-
-			var fields = new List<KeyValuePair<string, string>>();
-			string? line;
-			while ((line = reader.ReadLine()) is not null)
+			var document = ReadDocument(filePath);
+			return new FrontMatterData
 			{
-				string trimmed = line.Trim();
-				if (trimmed == "---" || trimmed == "...")
-					break;
-
-				int colon = trimmed.IndexOf(':');
-				if (colon <= 0)
-					continue;
-
-				string key = trimmed[..colon].Trim();
-				string value = trimmed[(colon + 1)..].Trim().Trim('"', '\'');
-				if (key.Length > 0)
-					fields.Add(new KeyValuePair<string, string>(key, value));
-			}
-
-			return new FrontMatterData { Fields = fields };
+				Fields = document.Header.Children
+					.Where(pair => pair.Key is YamlScalarNode && pair.Value is YamlScalarNode)
+					.Select(pair => new KeyValuePair<string, string>(
+						((YamlScalarNode)pair.Key).Value ?? "",
+						((YamlScalarNode)pair.Value).Value ?? ""))
+					.ToList(),
+			};
 		}
 		catch (IOException)
 		{
@@ -57,8 +41,41 @@ public static class FrontMatter
 		{
 			return Empty;
 		}
+		catch (YamlException)
+		{
+			return Empty;
+		}
+	}
+
+	internal static MarkdownDocument ReadDocument(string filePath)
+	{
+		var text = File.ReadAllText(filePath);
+		using var reader = new StringReader(text);
+		if (reader.ReadLine()?.Trim().TrimStart('\uFEFF') != "---")
+			return new MarkdownDocument(text, new YamlMappingNode());
+
+		var header = new StringBuilder();
+		string? line;
+		while ((line = reader.ReadLine()) is not null)
+		{
+			if (line.Trim() is "---" or "...")
+			{
+				var yaml = new YamlStream();
+				yaml.Load(new StringReader(header.ToString()));
+				if (yaml.Documents.Count == 0)
+					return new MarkdownDocument(reader.ReadToEnd(), new YamlMappingNode());
+				if (yaml.Documents.Count != 1 || yaml.Documents[0].RootNode is not YamlMappingNode mapping)
+					throw new InvalidDataException($"The header in '{filePath}' must contain named fields.");
+				return new MarkdownDocument(reader.ReadToEnd(), mapping);
+			}
+			header.AppendLine(line);
+		}
+
+		throw new InvalidDataException($"Missing closing header delimiter in '{filePath}'.");
 	}
 }
+
+internal sealed record MarkdownDocument(string Body, YamlMappingNode Header);
 
 /// <summary>
 /// The top-level scalar pairs parsed from a front matter block, in file
