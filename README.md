@@ -30,7 +30,9 @@ Display transcripts and metadata are stored under `%LOCALAPPDATA%\TurboPilot\ses
 
 Options are opt-in and saved only on **OK**. Downloads are retained when the dialog is canceled. Editable instructions and task skills live under `%LOCALAPPDATA%\TurboPilot\mediator`; **Open Configuration Folder** opens them for an external editor. Existing edits are never overwritten.
 
-The embedded runtime and settings are available. Chat transformation, summary handoff, and monitoring integration are still in progress.
+The processing layer measures prompt reductions with a bundled local tokenizer and rejects rewrites that lose protected paths, numbers, or literals. Output preparation validates formatting suggestions and local file access instead of accepting rewritten factual prose. Summaries retain the original worklog and replace the compact restart context incrementally. Local failures preserve chat text and report their status.
+
+The embedded runtime, settings, and processing layer are available. Live chat integration and summary handoff are still in progress.
 
 ## Build
 

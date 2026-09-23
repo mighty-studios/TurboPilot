@@ -15,6 +15,8 @@ Inspect `response` in light of `prompt`, `summary`, and any supplied `evidence`.
 Return `{"warnings":[{"kind":"repetition","message":"brief possible issue","quote":"exact excerpt from the response"}]}`.
 Allowed kinds are `repetition`, `contradiction`, and `unsupported-claim`.
 Return at most three warnings, or an empty array when no concrete issue is visible.
+The empty case is exactly {"warnings":[]}, not a bare array, string, or explanation.
+Stop immediately after the closing brace. Do not add markdown fences or explain why there are no warnings.
 
 ## Gotchas
 

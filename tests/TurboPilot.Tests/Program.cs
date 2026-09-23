@@ -8,6 +8,7 @@ internal static class Program
 		{
 			await CoreChecks.RunAsync();
 			MediatorChecks.RunFoundation();
+			await MediatorChecks.RunProcessingAsync();
 			if (args.Contains("--runtime"))
 				await RuntimeChecks.RunAsync();
 			if (args.Contains("--ui"))

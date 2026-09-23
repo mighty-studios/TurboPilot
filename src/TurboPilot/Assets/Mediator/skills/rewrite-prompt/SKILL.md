@@ -18,9 +18,18 @@ action, condition, exception, identifier, literal, file path, number, and negati
 Leave ambiguous references ambiguous rather than guessing their meaning.
 Do not add solutions, assumptions, or a plan.
 
+Copy every string in `protectedText` exactly into the reduced prompt. Keep numbers
+as written: `3` must not become `three`. Preserve the entire meaning of every
+restriction, including what must not be edited or executed.
+
 Return `{"prompt":"shorter equivalent wording","meaningPreserved":true}`.
 If no safe reduction is possible, return the original prompt and set
 `meaningPreserved` to false.
+
+Example:
+Input: "Please summarize README.md in 3 bullets without editing any files. Thanks."
+Output: `{"prompt":"Summarize README.md in 3 bullets without editing any files.","meaningPreserved":true}`
+Invalid: "Summarize README.md in three bullets" drops the no-edit restriction and changes a number.
 
 ## Gotchas
 

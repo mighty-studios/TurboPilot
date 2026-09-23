@@ -98,6 +98,7 @@ public sealed class FoundryModelRuntime : ILocalModelRuntime
 			_client.Settings.Temperature = 0;
 			_client.Settings.RandomSeed = 1;
 			_client.Settings.N = 1;
+			_client.Settings.ResponseFormat = new Microsoft.AI.Foundry.Local.OpenAI.ResponseFormatExtended { Type = "json_object" };
 		}
 		catch (OperationCanceledException) { throw; }
 		catch (Exception ex) when (linked.IsCancellationRequested)
