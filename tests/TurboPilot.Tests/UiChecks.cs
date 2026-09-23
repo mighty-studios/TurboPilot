@@ -424,6 +424,9 @@ internal static class UiChecks
 		var main = Control<Grid>(window, "MainGrid");
 		var prompt = Control<Grid>(window, "promptInputGrid");
 		var label = Control<Label>(window, "labelUserPrompt");
+		var output = Control<Grid>(window, "modelOutputGrid");
+		var outputLabel = Control<Label>(window, "labelModelOutput");
+		var outputTabs = Control<TabControl>(window, "outputTabs");
 		var input = Control<RichTextBox>(window, "richTextBoxInput");
 		var body = (Grid)input.Parent;
 		var history = (Border)((Grid)Control<Button>(window, "buttonHistoryPrev").Parent).Parent;
@@ -447,6 +450,12 @@ internal static class UiChecks
 
 		void CheckBounds()
 		{
+			Check.True(outputLabel.IsVisible && outputLabel.ActualHeight > 0, "Keep the output label visible.");
+			var outputLabelBottom = outputLabel.TranslatePoint(new Point(0, outputLabel.ActualHeight), output).Y;
+			Near(outputLabelBottom + outputLabel.Margin.Bottom, outputTabs.TranslatePoint(new Point(), output).Y,
+				"Place the tabs immediately below Model Output");
+			Near(output.ActualHeight, outputTabs.TranslatePoint(new Point(0, outputTabs.ActualHeight), output).Y,
+				"Keep the output tabs filling their pane");
 			var labelBottom = label.TranslatePoint(new Point(0, label.ActualHeight), prompt).Y;
 			var bodyTop = body.TranslatePoint(new Point(), prompt).Y;
 			Check.True(label.IsVisible && label.ActualHeight > 0, "Keep the prompt label visible.");
@@ -472,6 +481,8 @@ internal static class UiChecks
 		try
 		{
 			Check.Equal("User Prompt", label.Content, "Display the requested label");
+			Check.Equal("Model Output", outputLabel.Content, "Display the output heading");
+			Check.True(ReferenceEquals(outputTabs, outputLabel.Target), "Associate the output label with its tabs.");
 			Check.True(ReferenceEquals(input, label.Target), "Associate the label with the prompt editor.");
 			window.Height = 640;
 			await LayoutAsync();
