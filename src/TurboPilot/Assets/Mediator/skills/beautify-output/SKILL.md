@@ -19,6 +19,8 @@ Return formatting suggestions only, not a rewritten response:
 Identify local file references already present in the response. Mark a reference
 as an image only for an image file. Suggest headings only for short, standalone
 plain-text section titles. Empty arrays are valid.
+Always return both keys: links and headings. If there are no suggestions, return
+exactly {"links":[],"headings":[]}. A response containing only headings is invalid.
 
 ## Gotchas
 

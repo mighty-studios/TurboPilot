@@ -134,7 +134,8 @@ internal static class OutputFormatter
 				report("Cannot prepare an image preview: " + ex.Message);
 			}
 		}
-		return $"[{Escape(label)}](kp-path:{Uri.EscapeDataString(path)})";
+		var linkText = label.StartsWith('`') && label.EndsWith('`') ? label : Escape(label);
+		return $"[{linkText}](kp-path:{Uri.EscapeDataString(path)})";
 	}
 
 	private static string Escape(string text) => text.Replace("\\", "\\\\").Replace("[", "\\[").Replace("]", "\\]");

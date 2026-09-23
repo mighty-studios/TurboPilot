@@ -19,6 +19,7 @@ public sealed class MediatorService : IMediatorSession
 	private readonly SemaphoreSlim _gate = new(1, 1);
 	private readonly CancellationTokenSource _lifetime = new();
 	private readonly object _disposeLock = new();
+	private readonly object _stateLock = new();
 	private Task? _disposeTask;
 	private MediatorSettings _settings;
 	private MediationState _state;
@@ -37,9 +38,18 @@ public sealed class MediatorService : IMediatorSession
 	public bool IsBusy => _busy;
 	public bool DebugRaw => _settings.DebugRaw;
 	public bool PreparesOutput => Enabled && _settings.BeautifyOutput;
+	public bool SummaryEnabled => Enabled && _settings.MaintainSummary;
+	public bool HasHistory { get { lock (_stateLock) return _state.Entries.Count > 0; } }
 	public string Status => _status;
-	public string? CurrentSummary => _state.SummaryThrough == _state.Entries.Count && !string.IsNullOrWhiteSpace(_state.Summary)
-		? _state.Summary : null;
+	public string? CurrentSummary
+	{
+		get
+		{
+			lock (_stateLock)
+				return _state.SummaryThrough == _state.Entries.Count && !string.IsNullOrWhiteSpace(_state.Summary)
+					? _state.Summary : null;
+		}
+	}
 
 	public MediatorService(string sessionId, string? workspace, MediatorSettings settings,
 		ILocalModelRuntime runtime, MediatorConfiguration configuration, MediationStore? store = null)
@@ -67,18 +77,28 @@ public sealed class MediatorService : IMediatorSession
 			return true;
 		}, cancellationToken);
 
-	public Task RecordAsync(string role, string content, bool interrupted = false, CancellationToken cancellationToken = default) =>
-		WithGateAsync(async token =>
+	public void Capture(string role, string content, bool interrupted = false)
+	{
+		lock (_stateLock)
 		{
 			_state.Entries.Add(new MediationEntry
 			{
 				Sequence = _state.Entries.Count + 1, Role = role, Content = content, Interrupted = interrupted,
 			});
 			SaveState();
+		}
+	}
+
+	public Task RecordAsync(string role, string content, bool interrupted = false, CancellationToken cancellationToken = default)
+	{
+		Capture(role, content, interrupted);
+		return WithGateAsync(async token =>
+		{
 			if (_settings.Enabled && _settings.MaintainSummary)
 				await UpdateSummaryCoreAsync(token).ConfigureAwait(false);
 			return true;
 		}, cancellationToken);
+	}
 
 	public Task<PromptPreparation> PreparePromptAsync(string prompt, IReadOnlyList<string>? attachments = null,
 		CancellationToken cancellationToken = default) => WithGateAsync(async token =>
@@ -135,8 +155,14 @@ public sealed class MediatorService : IMediatorSession
 			}
 			if (_settings.MonitorOutput && CanRun)
 			{
-				var prompt = _state.Entries.LastOrDefault(entry => entry.Role == "user")?.Content ?? "";
-				var input = JsonSerializer.Serialize(new { prompt, response = output, summary = CurrentSummary ?? "" });
+				string prompt;
+				MediationEntry[] evidence;
+				lock (_stateLock)
+				{
+					prompt = _state.Entries.LastOrDefault(entry => entry.Role == "user")?.Content ?? "";
+					evidence = _state.Entries.Where(entry => entry.Role == "tool").TakeLast(5).ToArray();
+				}
+				var input = JsonSerializer.Serialize(new { prompt, response = output, summary = CurrentSummary ?? "", evidence });
 				var response = await RunAsync(MediatorOperation.MonitorOutput, input, 700, raw =>
 				{
 					var result = Parse<MonitoringResponse>(raw);
@@ -166,11 +192,16 @@ public sealed class MediatorService : IMediatorSession
 
 	private async Task UpdateSummaryCoreAsync(CancellationToken cancellationToken)
 	{
-		if (!CanRun || _state.SummaryThrough >= _state.Entries.Count)
-			return;
-		var summary = _state.Summary;
-		var through = _state.SummaryThrough;
-		foreach (var entry in _state.Entries.Where(entry => entry.Sequence > through).ToArray())
+		string summary;
+		MediationEntry[] pending;
+		lock (_stateLock)
+		{
+			if (!CanRun || _state.SummaryThrough >= _state.Entries.Count)
+				return;
+			summary = _state.Summary;
+			pending = _state.Entries.Where(entry => entry.Sequence > _state.SummaryThrough).ToArray();
+		}
+		foreach (var entry in pending)
 		{
 			foreach (var chunk in MediationText.SplitForContext(entry.Content, Math.Max(256, Math.Min(1200, _contextTokens / 3))))
 			{
@@ -189,10 +220,13 @@ public sealed class MediatorService : IMediatorSession
 				if (result is null) return;
 				summary = result.Summary.Trim();
 			}
-			_state.Summary = summary;
-			_state.SummaryThrough = entry.Sequence;
-			_state.SummaryUpdatedAt = DateTimeOffset.UtcNow;
-			SaveState();
+			lock (_stateLock)
+			{
+				_state.Summary = summary;
+				_state.SummaryThrough = entry.Sequence;
+				_state.SummaryUpdatedAt = DateTimeOffset.UtcNow;
+				SaveState();
+			}
 		}
 	}
 
@@ -224,7 +258,25 @@ public sealed class MediatorService : IMediatorSession
 			var response = await _runtime.GenerateAsync(instructions, input, maxOutputTokens, budget.Token).ConfigureAwait(false);
 			budget.Token.ThrowIfCancellationRequested();
 			DiagnosticReceived?.Invoke(new(operation, input, response.Text));
-			var result = parse(response.Text);
+			T result;
+			try { result = parse(response.Text); }
+			catch (Exception ex) when (ex is JsonException or InvalidDataException)
+			{
+				var repair = JsonSerializer.Serialize(new
+				{
+					request = "Correct the invalid response to match the task's exact JSON schema. Preserve source meaning. Return all required keys and no extra keys.",
+					originalInput = JsonSerializer.Deserialize<JsonElement>(input),
+					invalidResponse = response.Text,
+					validationError = ex.Message,
+				});
+				if (MediationText.CountTokens(instructions) + MediationText.CountTokens(repair) + maxOutputTokens + 128 > _contextTokens)
+					throw new InvalidDataException("The local response was invalid and cannot be corrected within the context budget.", ex);
+				DiagnosticReceived?.Invoke(new(operation, input, response.Text, "Requesting one schema correction within the original timeout."));
+				response = await _runtime.GenerateAsync(instructions, repair, maxOutputTokens, budget.Token).ConfigureAwait(false);
+				budget.Token.ThrowIfCancellationRequested();
+				DiagnosticReceived?.Invoke(new(operation, repair, response.Text));
+				result = parse(response.Text);
+			}
 			_failures = 0;
 			SetStatus("Mediator ready");
 			return result;
@@ -254,7 +306,7 @@ public sealed class MediatorService : IMediatorSession
 
 	private void SaveState()
 	{
-		try { _store.Save(_state); }
+		try { lock (_stateLock) _store.Save(_state); }
 		catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
 		{
 			NoticeReceived?.Invoke("Cannot save the Mediator worklog; it remains in memory: " + ex.Message);

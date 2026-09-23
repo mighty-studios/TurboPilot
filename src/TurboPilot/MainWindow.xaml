@@ -66,6 +66,7 @@
                 <Separator/>
                 <MenuItem x:Name="menuSettings" Header="Set_tings..." Click="OnSettings"/>
                 <MenuItem x:Name="menuMediator" Header="_Mediator..." Click="OnMediator"/>
+                <MenuItem x:Name="menuSummary" Header="Mediator S_ummary..." Click="OnMediatorSummary"/>
                 <MenuItem Header="C_ustomization..." Click="OnCustomization"/>
                 <MenuItem Header="Pe_rmissions..." Click="OnPermissions"/>
                 <Separator/>
@@ -212,6 +213,9 @@
                             </Style>
                         </RichTextBox.Resources>
                     </RichTextBox>
+                    <TextBlock x:Name="mediatorNotice" Grid.Row="1" Margin="4,4,4,0"
+							TextWrapping="Wrap" MaxHeight="68" Visibility="Collapsed"
+							Foreground="{DynamicResource Turboland.Brush.WindowForeground}"/>
                 </Grid>
             </Grid>
             <!-- Live session badge over the output area: model and session id

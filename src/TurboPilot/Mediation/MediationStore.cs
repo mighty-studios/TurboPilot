@@ -22,8 +22,8 @@ public sealed class MediationStore
 
 	public MediationStore(string sessionId, string? workspace, string? root = null)
 	{
-		if (string.IsNullOrWhiteSpace(sessionId) || sessionId.Length > 160
-			|| !sessionId.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_'))
+		if (string.IsNullOrWhiteSpace(sessionId) || sessionId.Length > 160 || sessionId is "." or ".."
+			|| !sessionId.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.'))
 			throw new ArgumentException("Invalid session ID.", nameof(sessionId));
 		var key = string.IsNullOrWhiteSpace(workspace) ? "no-workspace"
 			: Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(PermissionService.MakeKey(workspace))))[..24].ToLowerInvariant();

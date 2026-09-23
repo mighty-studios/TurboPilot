@@ -21,6 +21,8 @@ Replace superseded decisions and remove stale next steps. Preserve precise
 identifiers, commands, and important numbers. Attribute unverified claims as
 reported rather than confirmed. Do not add goals or instructions of your own.
 Keep the summary within one short page, preferably below 700 tokens.
+Return exactly one key, summary. Put goals, constraints, next actions, and other
+details inside that string. Do not add nextAction, goal, or other JSON properties.
 
 ## Gotchas
 

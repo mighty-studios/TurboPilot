@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using TurboPilot.Ai;
 using TurboPilot.Storage;
+using TurboPilot.Mediation;
 
 namespace TurboPilot.Sessions;
 
@@ -19,6 +20,8 @@ public sealed class SessionRecord
 	public int ContextWindowTokens { get; set; }
 	public long AicNano { get; set; }
 	public bool UsesApiKey { get; set; }
+	public SummaryBootstrap? Bootstrap { get; set; }
+	public bool BootstrapPending { get; set; }
 
 	[JsonIgnore]
 	public string DisplayLabel => $"{UpdatedAt.ToLocalTime():g} | {Options.Model} | "
@@ -59,6 +62,7 @@ public sealed class SessionStore
 			UsesApiKey = options.UseByok && !string.IsNullOrWhiteSpace(options.ByokApiKey),
 		};
 		File.WriteAllText(transcriptPath, transcript);
+		File.WriteAllText(FilePath(sessionId, ".rendered.md"), transcript);
 		Save(record);
 		return record;
 	}
@@ -95,12 +99,25 @@ public sealed class SessionStore
 	}
 
 	public string ReadTranscript(string sessionId) => File.ReadAllText(FilePath(sessionId, ".md"));
+	public string ReadRenderedTranscript(string sessionId)
+	{
+		var path = FilePath(sessionId, ".rendered.md");
+		return File.Exists(path) ? File.ReadAllText(path) : ReadTranscript(sessionId);
+	}
 
 	public void AppendTranscript(string sessionId, string text) =>
 		File.AppendAllText(FilePath(sessionId, ".md"), text);
+	public void AppendRenderedTranscript(string sessionId, string text) =>
+		File.AppendAllText(FilePath(sessionId, ".rendered.md"), text);
 
 	public void WriteTranscript(string sessionId, string text) =>
-		WriteAtomic(FilePath(sessionId, ".md"), stream =>
+		WriteText(FilePath(sessionId, ".md"), text);
+
+	public void WriteRenderedTranscript(string sessionId, string text) =>
+		WriteText(FilePath(sessionId, ".rendered.md"), text);
+
+	private static void WriteText(string path, string text) =>
+		WriteAtomic(path, stream =>
 		{
 			using var writer = new StreamWriter(stream, Encoding.UTF8, leaveOpen: true);
 			writer.Write(text);

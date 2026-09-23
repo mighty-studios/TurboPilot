@@ -57,6 +57,7 @@ internal static class MediatorChecks
 			var output = "Results\r\n\r\nSee `src\\main.cs` and preview.png.\r\n\r\nEverything is verified.\r\n\r\n```csharp\r\nsrc\\main.cs\r\n```";
 			var display = await mediator.PrepareOutputAsync(output);
 			Check.True(display.Markdown.Contains("kp-path:" + Uri.EscapeDataString(file)), "Link a verified file reference.");
+			Check.True(display.Markdown.Contains("[`src\\main.cs`]"), "Preserve single backslashes inside a code-formatted link label.");
 			Check.True(display.Markdown.Contains("data:image/png;base64,"), "Embed a permitted local image.");
 			Check.True(display.Markdown.Contains("## Results") && display.Markdown.Contains("```csharp\r\nsrc\\main.cs\r\n```"), "Prepare headings without modifying code.");
 			Check.Equal(1, display.Warnings.Count, "Surface a grounded warning");
@@ -91,6 +92,13 @@ internal static class MediatorChecks
 		await mediator.PreparePromptAsync("Off means pass-through.");
 		Check.Equal(calls, runtime.Requests.Count, "Disabled mediation must not run inference");
 		await mediator.ConfigureAsync(options);
+		var repairAttempts = 0;
+		runtime.Generate = (_, input, _) => Task.FromResult(new LocalCompletion(++repairAttempts == 1
+			? """{"result":"wrong schema"}"""
+			: """{"prompt":"Keep this unchanged.","meaningPreserved":true}"""));
+		var repaired = await mediator.PreparePromptAsync("Please, if possible, keep this unchanged.");
+		Check.Equal(2, repairAttempts, "Allow one bounded schema correction");
+		Check.Equal("Keep this unchanged.", repaired.Prompt, "Validate the corrected result before use");
 		runtime.LoadError = new LocalModelUnavailableException("Missing model.");
 		await mediator.PreparePromptAsync("Model unavailable.");
 		Check.Equal("Mediator offline", mediator.Status, "Offline state must be explicit");
@@ -179,6 +187,9 @@ internal static class MediatorChecks
 			"Return only the JSON object {\"ready\":true}.",
 			"Confirm readiness.", 64, timeout.Token);
 		Check.True(result.Text.Contains("true", StringComparison.OrdinalIgnoreCase), "Complete an on-device request.");
+		using (var canceled = new CancellationTokenSource(50))
+			await Check.ThrowsAsync<OperationCanceledException>(() => runtime.GenerateAsync(
+				"Write a long JSON array of integers.", "List every integer from 1 to 1000.", 2000, canceled.Token));
 		await runtime.UnloadAsync(timeout.Token);
 		Console.WriteLine("PASS default on-device model download, loading, generation, and unloading");
 		using var workspace = new TestWorkspace();
@@ -204,6 +215,32 @@ internal static class MediatorChecks
 		Check.Equal(0, notices.Count, "On-device processing must not silently fall back: " + string.Join(" | ", notices)
 			+ " Responses: " + string.Join(" | ", diagnostics.Select(item => item.Output)));
 		Console.WriteLine($"PASS default on-device prompt reduction ({rewritten.OriginalTokens} -> {rewritten.PreparedTokens} tokens), summary, formatting, and monitoring");
+		await mediator.DisposeAsync();
+		await using var provider = new LocalProvider();
+		await using var chat = workspace.CreateChat();
+		chat.MediatorFactory = (id, folder) =>
+		{
+			var service = new MediatorService(id, folder,
+				options with { BeautifyOutput = true }, runtime, configuration,
+				new MediationStore(id, folder, Path.Combine(workspace.Root, "worklogs")));
+			service.DiagnosticReceived += diagnostics.Add;
+			return service;
+		};
+		chat.MediatorNoticeReceived += notices.Add;
+		await chat.StartAsync(new Ai.ChatSessionOptions
+		{
+			WorkspaceFolder = workspace.Workspace, Model = "test-model", UseByok = true,
+			ByokEndpoint = provider.Endpoint, ContextWindowTokens = 32768,
+		}, timeout.Token);
+		provider.Replies.Enqueue(new LocalProvider.Reply("Results\r\n\r\nReviewed `README.md` without changing any files."));
+		await RuntimeChecks.SendAndWaitAsync(chat,
+			"Please, if you have a moment, summarize README.md in 3 bullet points without editing any files. Thank you very much.");
+		Check.True(!provider.Requests.Last().GetRawText().Contains("if you have a moment"), "Forward the actual native reduction.");
+		Check.True(chat.RenderedTranscript.Contains("kp-path:") && !chat.Transcript.Contains("kp-path:"), "Keep native prepared output separate from Raw. "
+			+ string.Join(" | ", notices) + " Responses: " + string.Join(" | ", diagnostics.Select(item => item.Output)));
+		Check.True(await chat.GetRestartSummaryAsync(timeout.Token) is not null, "Maintain restart context through the real native chat path.");
+		Check.Equal(0, notices.Count, "Native chat must not hide local processing failures: " + string.Join(" | ", notices));
+		Console.WriteLine("PASS integrated on-device mediation through a native SDK chat session");
 	}
 }
 

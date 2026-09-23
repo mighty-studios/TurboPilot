@@ -24,11 +24,10 @@ public partial class MainWindow : TurbolandWindow
 	private bool _openedAtTop = false;
 	private bool _rawOpenedAtTop = false;
 
-	// The verbatim transcript shown in the Raw tab. It is the source of
-	// truth for both output views: the Rendered WebView2 always mirrors
-	// this buffer, so a full re-sync is possible at any time (e.g. after
-	// the page (re)loads).
+	// Raw preserves streamed text; Rendered can replace completed messages
+	// with prepared formatting without exposing local diagnostic traffic.
 	private readonly StringBuilder _outputText = new();
+	private readonly StringBuilder _renderedText = new();
 	private readonly System.Windows.Documents.Run _rawOutputRun = new();
 
 	// Attachments tracking
@@ -48,12 +47,14 @@ public partial class MainWindow : TurbolandWindow
 	private readonly SemaphoreSlim _sessionChange = new(1, 1);
 	private readonly HashSet<string> _historySessions = [];
 	private CancellationTokenSource? _startCancellation;
+	private CancellationTokenSource? _restartCancellation;
 	private bool _sessionChanging;
 	private bool _sendingInput;
 	private bool _closing;
 	private bool _closeApproved;
-	private readonly MediatorConfiguration _mediatorConfiguration = new();
-	private readonly ILocalModelRuntime _localRuntime = new FoundryModelRuntime();
+	private readonly MediatorConfiguration _mediatorConfiguration;
+	private readonly ILocalModelRuntime _localRuntime;
+	private readonly Func<string, string?, IMediatorSession>? _createMediator;
 
 	// Model id and session id of the live session, shown in the
 	// sessionInfo badge. Both null while no session is running.
@@ -73,11 +74,16 @@ public partial class MainWindow : TurbolandWindow
 	}
 
 	internal MainWindow(SessionStore sessionStore, Func<ChatService>? createChat = null,
-		Func<string?, CustomizationLibrary>? collectCustomizations = null, string? webViewDataFolder = null)
+		Func<string?, CustomizationLibrary>? collectCustomizations = null, string? webViewDataFolder = null,
+		ILocalModelRuntime? localRuntime = null, MediatorConfiguration? mediatorConfiguration = null,
+		Func<string, string?, IMediatorSession>? createMediator = null)
 	{
 		_sessionStore = sessionStore;
 		_createChat = createChat ?? (() => new ChatService(_sessionStore));
 		_collectCustomizations = collectCustomizations ?? CustomizationService.Rescan;
+		_localRuntime = localRuntime ?? new FoundryModelRuntime();
+		_mediatorConfiguration = mediatorConfiguration ?? new MediatorConfiguration();
+		_createMediator = createMediator;
 		_webViewDataFolder = webViewDataFolder ?? System.IO.Path.Combine(
 			Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TurboPilot", "webview2-default");
 		InitializeComponent();
@@ -152,6 +158,7 @@ public partial class MainWindow : TurbolandWindow
 		menuPastSessions.IsEnabled = !_sessionChanging && !_closing;
 		menuSettings.IsEnabled = !_sessionChanging && !_closing;
 		menuMediator.IsEnabled = !_sessionChanging && !_closing;
+		menuSummary.IsEnabled = ready && _chat?.SummaryEnabled == true;
 
 		richTextBoxInput.IsEnabled = ready;
 		UpdateHistoryButtons();
@@ -520,16 +527,14 @@ public partial class MainWindow : TurbolandWindow
 
 	// ── Output API ───────────────────────────────────────────────────────────
 	//
-	// The Raw tab is the source of truth. AppendOutput and ClearOutput
-	// write the verbatim text there and mirror the same content into the
-	// Rendered WebView2, which displays it as rendered markdown with
-	// Mermaid diagrams and inline images. Both views are read-only; all
-	// writes go through this API.
+	// Common notices go to both views. Chat events keep Raw text separate
+	// from prepared Rendered content and optional local diagnostics.
 
 	/// <summary>
 	/// The full verbatim transcript currently displayed in the Raw tab.
 	/// </summary>
 	public string OutputText => _outputText.ToString();
+	public string RenderedText => _renderedText.ToString();
 
 	/// <summary>
 	/// The sample document both output views open with. It ships as markdown
@@ -566,12 +571,35 @@ public partial class MainWindow : TurbolandWindow
 			return;
 		}
 
+		AppendRawOutput(text);
+		AppendRenderedOutput(text);
+	}
+
+	private void AppendRawOutput(string text)
+	{
 		_outputText.Append(text);
 		// Range-based appends normalize paragraph boundaries between chunks.
 		_rawOutputRun.ContentEnd.InsertTextInRun(text);
 		richTextBoxOutput.CaretPosition = _rawOutputRun.ContentEnd;
 		richTextBoxOutput.ScrollToEnd();
+	}
+
+	private void AppendRenderedOutput(string text)
+	{
+		_renderedText.Append(text);
 		PushToRenderer($"appendTranscript({JsString(text)})");
+	}
+
+	private void ReplaceRenderedOutput(string text)
+	{
+		_renderedText.Clear().Append(text);
+		PushToRenderer($"setTranscript({JsString(text)})");
+	}
+
+	private void ReplaceRawOutput(string text)
+	{
+		_outputText.Clear().Append(text);
+		_rawOutputRun.Text = text;
 	}
 
 	/// <summary>
@@ -587,6 +615,7 @@ public partial class MainWindow : TurbolandWindow
 		}
 
 		_outputText.Clear();
+		_renderedText.Clear();
 		_rawOutputRun.Text = "";
 		PushToRenderer("clearAll()");
 	}
@@ -603,13 +632,12 @@ public partial class MainWindow : TurbolandWindow
 	}
 
 	/// <summary>
-	/// Replaces the Rendered tab content with the full transcript buffer
-	/// so it matches the Raw tab exactly.
+	/// Restores the prepared display after the page loads or reloads.
 	/// </summary>
 	private void SyncRenderedTranscript()
 	{
 		if (!_webViewReady) return;
-		_ = webViewOutput.CoreWebView2.ExecuteScriptAsync($"setTranscript({JsString(_outputText.ToString())})");
+		_ = webViewOutput.CoreWebView2.ExecuteScriptAsync($"setTranscript({JsString(_renderedText.ToString())})");
 
 		if (_openedAtTop) return;
 		_openedAtTop = true;
@@ -731,7 +759,7 @@ public partial class MainWindow : TurbolandWindow
 
 			if (dialog.BeginRequested && !string.IsNullOrEmpty(dialog.WorkspacePath))
 			{
-				await StartChatAsync(new ChatSessionOptions
+				await StartFromSettingsAsync(new ChatSessionOptions
 				{
 					WorkspaceFolder = dialog.WorkspacePath,
 					Model = dialog.SelectedModel,
@@ -752,6 +780,50 @@ public partial class MainWindow : TurbolandWindow
 		}
 	}
 
+	private async Task StartFromSettingsAsync(ChatSessionOptions options)
+	{
+		using var cancellation = new CancellationTokenSource();
+		_restartCancellation = cancellation;
+		_sessionChanging = true;
+		SetSessionActive(IsSessionActive);
+		try
+		{
+			SummaryBootstrap? bootstrap = null;
+			if (_chat is { SummaryEnabled: true } current && ShouldOfferBootstrap(current.Options, options)
+				&& YesNoDialog.Ask(this, "Use the Mediator summary as context for the new session?", "Restart Context"))
+			{
+				try
+				{
+					bootstrap = await current.GetRestartSummaryAsync(cancellation.Token);
+					cancellation.Token.ThrowIfCancellationRequested();
+					if (bootstrap is null)
+						MessageDialog.Ok(this, "No up-to-date summary is available. The new session will start without one.", "Mediator");
+				}
+				catch (Exception ex) when (ex is not OperationCanceledException)
+				{
+					MessageDialog.Ok(this, "Cannot prepare restart context: " + ex.Message + "\r\nThe new session will start without it.", "Mediator");
+				}
+			}
+			cancellation.Token.ThrowIfCancellationRequested();
+			await StartChatCoreAsync(options, null, bootstrap);
+		}
+		catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+		finally
+		{
+			_restartCancellation = null;
+			_sessionChanging = false;
+			RefreshChatState();
+		}
+	}
+
+	internal static bool ShouldOfferBootstrap(ChatSessionOptions current, ChatSessionOptions next) =>
+		!string.IsNullOrWhiteSpace(current.WorkspaceFolder)
+		&& MediationStore.SameWorkspace(current.WorkspaceFolder, next.WorkspaceFolder)
+		&& (current.Model != next.Model || current.ReasoningEffort != next.ReasoningEffort || current.Mode != next.Mode
+			|| current.UseByok != next.UseByok || current.ByokEndpoint != next.ByokEndpoint || current.ByokApiKey != next.ByokApiKey
+			|| current.ApplyInstructions != next.ApplyInstructions || current.PreloadSkills != next.PreloadSkills
+			|| current.ContextWindowTokens != next.ContextWindowTokens);
+
 	/// <summary>
 	/// Session menu: ends the active session.
 	/// </summary>
@@ -765,6 +837,7 @@ public partial class MainWindow : TurbolandWindow
 	/// </summary>
 	public async Task EndSessionAsync()
 	{
+		_restartCancellation?.Cancel();
 		_startCancellation?.Cancel();
 		await _sessionChange.WaitAsync();
 		_sessionChanging = true;
@@ -802,7 +875,10 @@ public partial class MainWindow : TurbolandWindow
 	/// wires its events into the transcript and the status line. A failed
 	/// start is reported in the transcript and drops back to no session.
 	/// </summary>
-	private async Task StartChatAsync(ChatSessionOptions options, string? resumeId = null)
+	private Task StartChatAsync(ChatSessionOptions options, string? resumeId = null) =>
+		StartChatCoreAsync(options, resumeId, null);
+
+	private async Task StartChatCoreAsync(ChatSessionOptions options, string? resumeId, SummaryBootstrap? bootstrap)
 	{
 		await _sessionChange.WaitAsync();
 		using var cancellation = new CancellationTokenSource();
@@ -819,8 +895,18 @@ public partial class MainWindow : TurbolandWindow
 			cancellation.Token.ThrowIfCancellationRequested();
 
 			var chat = _createChat();
+			chat.MediatorFactory ??= _createMediator ?? ((id, workspace) => new MediatorService(
+				id, workspace, _mediatorConfiguration.Load(), _localRuntime, _mediatorConfiguration));
 			_chat = chat;
-			chat.TranscriptReceived += text => ForActiveChat(chat, () => AppendOutput(text));
+			chat.TranscriptReceived += text => ForActiveChat(chat, () => AppendRawOutput(text));
+			chat.RenderedReceived += text => ForActiveChat(chat, () => AppendRenderedOutput(text));
+			chat.RenderedReplaced += text => ForActiveChat(chat, () => ReplaceRenderedOutput(text));
+			chat.MediatorNoticeReceived += text => ForActiveChat(chat, () => ShowMediatorNotice(text));
+			chat.MediatorDiagnosticReceived += diagnostic => ForActiveChat(chat, () =>
+			{
+				if (chat.DebugRaw)
+					AppendRawOutput($"\r\n[mediator {diagnostic.Operation}]\r\nInput: {diagnostic.Input}\r\nOutput: {diagnostic.Output}\r\n{diagnostic.Note}\r\n");
+			});
 			chat.ErrorReceived += text => ForActiveChat(chat, () => AppendOutput($"\r\n[error] {text}\r\n\r\n"));
 			chat.StateChanged += () => ForActiveChat(chat, RefreshChatState);
 			chat.UsageChanged += () => ForActiveChat(chat, () =>
@@ -834,6 +920,8 @@ public partial class MainWindow : TurbolandWindow
 			});
 
 			ClearOutput();
+			mediatorNotice.Text = "";
+			mediatorNotice.Visibility = Visibility.Collapsed;
 			_statusBase = "Starting..";
 			_sessionModel = options.Model;
 			_ctxTotal = options.ContextWindowTokens;
@@ -845,6 +933,11 @@ public partial class MainWindow : TurbolandWindow
 				await chat.StartAsync(options, cancellation.Token);
 			else
 				await chat.ResumeAsync(resumeId, options, cancellation.Token);
+			if (bootstrap is not null)
+			{
+				chat.SetBootstrap(bootstrap);
+				ShowMediatorNotice("The previous summary will accompany the next prompt as background context.");
+			}
 
 			cancellation.Token.ThrowIfCancellationRequested();
 			_sessionId = chat.SessionId ?? throw new InvalidOperationException("The runtime did not return a session ID.");
@@ -891,6 +984,7 @@ public partial class MainWindow : TurbolandWindow
 	{
 		_statusBase = _sessionChanging ? "Starting.."
 			: _chat?.HasPendingQuestion == true ? "Waiting.."
+			: _chat?.IsMediating == true ? "Mediating.."
 			: _chat?.IsWorking == true ? "Working.." : "Ready..";
 		SetSessionActive(_chat is not null);
 	}
@@ -919,8 +1013,10 @@ public partial class MainWindow : TurbolandWindow
 			{
 				await EndSessionAsync();
 				var transcript = _sessionStore.ReadTranscript(selected.SessionId);
+				var rendered = _sessionStore.ReadRenderedTranscript(selected.SessionId);
 				ClearOutput();
-				AppendOutput(transcript);
+				AppendRawOutput(transcript);
+				AppendRenderedOutput(rendered);
 				return;
 			}
 
@@ -959,6 +1055,8 @@ public partial class MainWindow : TurbolandWindow
 		}
 
 		statusTextBlock.Text = FormatStatus(_statusBase, _ctxUsed, _ctxTotal, _aic, _showAic);
+		if (_chat?.MediationStatus is "Mediator offline" or "Mediator disabled" or "Mediator error")
+			statusTextBlock.Text += " Med=" + _chat.MediationStatus[9..];
 	}
 
 	internal static string FormatStatus(string status, int used, int total, double credits, bool showCredits)
@@ -1033,7 +1131,7 @@ public partial class MainWindow : TurbolandWindow
 				UpdateAttachmentButton();
 			}
 		}
-		catch (OperationCanceledException) when (_sessionChanging || _closing || !ReferenceEquals(_chat, chat))
+		catch (OperationCanceledException)
 		{
 		}
 		catch (Exception ex)
@@ -1097,10 +1195,44 @@ public partial class MainWindow : TurbolandWindow
 		new Dialogs.PermissionsDialog(ActiveWorkspacePath).ShowDialog(this);
 	}
 
-	private void OnMediator(object sender, RoutedEventArgs e)
+	private async void OnMediator(object sender, RoutedEventArgs e)
 	{
-		try { new MediatorDialog(_mediatorConfiguration, _localRuntime).ShowDialog(this); }
+		try
+		{
+			var dialog = new MediatorDialog(_mediatorConfiguration, _localRuntime);
+			if (dialog.ShowDialog(this) == true && dialog.Result is { } options && _chat is { } chat)
+			{
+				await chat.ConfigureMediatorAsync(options);
+				ForActiveChat(chat, () =>
+				{
+					if (!chat.DebugRaw)
+						ReplaceRawOutput(chat.Transcript);
+					ShowMediatorNotice(options.Enabled ? "Mediator options applied." : "Mediator disabled; original chat is preserved.");
+				});
+			}
+		}
 		catch (Exception ex) { MessageDialog.Ok(this, "Cannot open Mediator settings: " + ex.Message, "Mediator"); }
+	}
+
+	private void ShowMediatorNotice(string text)
+	{
+		mediatorNotice.Text = "Mediator: " + text;
+		mediatorNotice.ToolTip = mediatorNotice.Text;
+		mediatorNotice.Visibility = Visibility.Visible;
+	}
+
+	private async void OnMediatorSummary(object sender, RoutedEventArgs e)
+	{
+		if (_chat is not { } chat) return;
+		try
+		{
+			if (chat.IsWorking && !YesNoDialog.Ask(this, "Stop the current work and prepare an up-to-date summary?", "Mediator"))
+				return;
+			var summary = await chat.GetRestartSummaryAsync();
+			if (ReferenceEquals(_chat, chat))
+				new SummaryDialog(summary?.Summary ?? "No up-to-date summary is available.").ShowDialog(this);
+		}
+		catch (Exception ex) { ShowMediatorNotice("Cannot prepare the summary: " + ex.Message); }
 	}
 
 	// -- Exit ------------------------------------------------------------------

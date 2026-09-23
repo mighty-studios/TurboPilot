@@ -6,6 +6,7 @@ public sealed record PromptPreparation(string Prompt, int OriginalTokens, int Pr
 public sealed record OutputPreparation(string Markdown, IReadOnlyList<MediatorWarning> Warnings);
 public sealed record FormatLink(string Text, string Path, bool Image = false);
 public sealed record FormatSuggestions(IReadOnlyList<FormatLink> Links, IReadOnlyList<string> Headings);
+public sealed record SummaryBootstrap(string SourceSessionId, string Workspace, string Summary);
 
 public sealed record MediationEntry
 {
@@ -14,7 +15,6 @@ public sealed record MediationEntry
 	public required string Content { get; init; }
 	public DateTimeOffset Timestamp { get; init; } = DateTimeOffset.UtcNow;
 	public bool Interrupted { get; init; }
-	public string? RenderedContent { get; set; }
 }
 
 public sealed record MediationState
@@ -36,7 +36,10 @@ public interface IMediatorSession : IAsyncDisposable
 	bool IsBusy { get; }
 	bool DebugRaw { get; }
 	bool PreparesOutput { get; }
+	bool SummaryEnabled { get; }
+	bool HasHistory { get; }
 	string Status { get; }
+	void Capture(string role, string content, bool interrupted = false);
 	Task ConfigureAsync(MediatorSettings settings, CancellationToken cancellationToken = default);
 	Task RecordAsync(string role, string content, bool interrupted = false, CancellationToken cancellationToken = default);
 	Task<PromptPreparation> PreparePromptAsync(string prompt, IReadOnlyList<string>? attachments = null, CancellationToken cancellationToken = default);

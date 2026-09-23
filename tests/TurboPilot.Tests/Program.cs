@@ -10,13 +10,18 @@ internal static class Program
 			MediatorChecks.RunFoundation();
 			await MediatorChecks.RunProcessingAsync();
 			if (args.Contains("--runtime"))
+			{
 				await RuntimeChecks.RunAsync();
+				await MediatedChatChecks.RunAsync();
+			}
 			if (args.Contains("--ui"))
 				await UiChecks.RunAsync();
 			if (args.Contains("--cloud"))
 				await RuntimeChecks.RunCloudAsync();
 			if (args.Contains("--mediator-native"))
 				await MediatorChecks.RunNativeAsync(args.Contains("--download-mediator"));
+			if (args.Contains("--mediator-chat") && !args.Contains("--runtime"))
+				await MediatedChatChecks.RunAsync();
 			Console.WriteLine("All requested checks passed.");
 			return 0;
 		}
