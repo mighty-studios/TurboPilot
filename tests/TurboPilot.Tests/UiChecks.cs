@@ -15,7 +15,7 @@ namespace TurboPilot.Tests;
 
 internal static class UiChecks
 {
-	public static Task RunAsync()
+	public static Task RunAsync(bool closingOnly = false)
 	{
 		var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 		var thread = new Thread(() =>
@@ -24,7 +24,12 @@ internal static class UiChecks
 			var application = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
 			application.Startup += async (_, _) =>
 			{
-				try { await RunWindowChecksAsync(application); }
+				try
+				{
+					if (!closingOnly)
+						await RunWindowChecksAsync(application);
+					await RunClosingChecksAsync(application);
+				}
 				catch (Exception ex) { failure = ex; }
 				finally { application.Shutdown(); }
 			};
@@ -37,6 +42,146 @@ internal static class UiChecks
 		thread.SetApartmentState(ApartmentState.STA);
 		thread.Start();
 		return finished.Task;
+	}
+
+	private static async Task RunClosingChecksAsync(Application application)
+	{
+		var unhandled = new List<Exception>();
+		void OnUnhandled(object sender, DispatcherUnhandledExceptionEventArgs e)
+		{
+			unhandled.Add(e.Exception);
+			e.Handled = true;
+		}
+		application.DispatcherUnhandledException += OnUnhandled;
+		try
+		{
+			for (var scenario = 0; scenario < 3; scenario++)
+			{
+				using var workspace = new TestWorkspace();
+				await using var provider = new LocalProvider();
+				var runtime = new FakeLocalRuntime();
+				var releaseCleanup = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+				var cleanupStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+				runtime.DisposeAction = () =>
+				{
+					cleanupStarted.TrySetResult();
+					return scenario switch
+					{
+						1 => new ValueTask(releaseCleanup.Task),
+						2 => ValueTask.FromException(new InvalidOperationException("Fixture shutdown failure.")),
+						_ => ValueTask.CompletedTask,
+					};
+				};
+				TurbolandTheme.Wpf.TurbolandTheme.Apply(application, TurbolandTheme.Core.ThemeMode.Authentic);
+				var window = new MainWindow(workspace.Store, workspace.CreateChat, _ => new(),
+					Path.Combine(workspace.Root, "browser"), runtime,
+					new MediatorConfiguration(Path.Combine(workspace.Root, "mediator")),
+					(id, folder) => new MediatorService(id, folder, new MediatorSettings(), runtime,
+						new MediatorConfiguration(Path.Combine(workspace.Root, "mediator")),
+						new MediationStore(id, folder, Path.Combine(workspace.Root, "worklogs"))));
+				TurbolandTheme.Wpf.TurbolandTheme.ApplyTo(window);
+				var closed = false;
+				window.Closed += (_, _) => closed = true;
+				var webView = Control<WebView2>(window, "webViewOutput");
+				var browserExited = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+				var browserObserved = false;
+				LocalProvider.Reply? slowReply = null;
+				try
+				{
+					window.Show();
+					await Check.UntilAsync(() => Field<bool>(window, "_webViewReady"), "The close fixture did not initialize.");
+					webView.CoreWebView2.Environment.BrowserProcessExited += (_, _) => browserExited.TrySetResult();
+					browserObserved = true;
+					if (scenario == 0)
+					{
+						foreach (var useCloseBox in new[] { false, true })
+						{
+							var answered = false;
+							using var answer = DialogAction<YesNoDialog>(application, dialog =>
+							{
+								answered = true;
+								if (useCloseBox) dialog.Close();
+								else Invoke(dialog, "OnNo", dialog, new RoutedEventArgs());
+							});
+							if (useCloseBox) window.Close();
+							else Invoke(window, "OnExitClick", window, new RoutedEventArgs());
+							await Check.UntilAsync(() => answered || unhandled.Count > 0, "The exit confirmation was not shown.");
+							await window.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+							Check.True(unhandled.Count == 0, "Declining exit must not throw: " + string.Join("\r\n", unhandled));
+							Check.True(!closed && window.IsVisible, "No and the confirmation close box must keep the main window open.");
+							Check.Equal(0, runtime.DisposeCalls, "Declining exit must not dispose the runtime");
+						}
+					}
+					if (scenario == 1)
+					{
+						await InvokeTask(window, "StartChatAsync", new ChatSessionOptions
+						{
+							WorkspaceFolder = workspace.Workspace, Model = "test-model", UseByok = true,
+							ByokEndpoint = provider.Endpoint, ContextWindowTokens = 32768,
+						}, null);
+						slowReply = new LocalProvider.Reply("Response interrupted by application exit.", Hold: true);
+						provider.Replies.Enqueue(slowReply);
+						await Field<ChatService>(window, "_chat").SendAsync("Keep this turn active.");
+						await slowReply.Started.Task.WaitAsync(TimeSpan.FromSeconds(15));
+					}
+
+					var confirmations = 0;
+					var closeReturned = false;
+					var confirmationDeferred = false;
+					var shutdownNotices = 0;
+					using var confirm = DialogAction<YesNoDialog>(application, dialog =>
+					{
+						confirmations++;
+						confirmationDeferred = closeReturned;
+						Invoke(dialog, "OnYes", dialog, new RoutedEventArgs());
+					});
+					using var acknowledge = DialogAction<MessageDialog>(application, dialog =>
+					{
+						shutdownNotices++;
+						Invoke(dialog, "OnOk", dialog, new RoutedEventArgs());
+					});
+					window.Close();
+					closeReturned = true;
+					window.Close();
+					if (scenario == 1)
+					{
+						await Check.UntilAsync(() => cleanupStarted.Task.IsCompleted || unhandled.Count > 0, "Asynchronous shutdown did not start.");
+						Check.True(!closed && !window.IsSessionActive, "End the active turn, then wait for local cleanup before closing.");
+						window.Close();
+						window.Close();
+						await window.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+						Check.Equal(1, confirmations, "Do not repeat confirmation during asynchronous cleanup");
+						releaseCleanup.TrySetResult();
+					}
+					await Check.UntilAsync(() => closed || unhandled.Count > 0, "Confirmed shutdown did not close the window.");
+					await window.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+					Check.True(unhandled.Count == 0, "Closing must not raise an unhandled exception: " + string.Join("\r\n", unhandled));
+					Check.True(closed && confirmationDeferred, "Leave the original Closing event before showing confirmation and closing again.");
+					Check.Equal(1, confirmations, "Confirm exit exactly once");
+					Check.Equal(1, runtime.DisposeCalls, "Dispose the local runtime exactly once");
+					Check.Equal(scenario == 2 ? 1 : 0, shutdownNotices, "Report runtime cleanup failures before exiting");
+					Check.Equal(0, provider.Errors.Count, "Stop an active response without provider failures");
+				}
+				finally
+				{
+					releaseCleanup.TrySetResult();
+					slowReply?.Release.TrySetResult();
+					if (!closed)
+					{
+						foreach (Window dialog in window.OwnedWindows.Cast<Window>().ToArray())
+							dialog.Close();
+						await window.EndSessionAsync();
+						SetField(window, "_closing", true);
+						SetField(window, "_closeApproved", true);
+						window.Close();
+					}
+					if (browserObserved)
+						await browserExited.Task.WaitAsync(TimeSpan.FromSeconds(15));
+				}
+			}
+			Console.WriteLine("PASS real window-close confirmation, synchronous/asynchronous cleanup, repeated requests, and shutdown errors");
+		}
+		finally { application.DispatcherUnhandledException -= OnUnhandled; }
 	}
 
 	private static async Task RunWindowChecksAsync(Application application)

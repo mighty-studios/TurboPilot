@@ -14,8 +14,8 @@ internal static class Program
 				await RuntimeChecks.RunAsync();
 				await MediatedChatChecks.RunAsync();
 			}
-			if (args.Contains("--ui"))
-				await UiChecks.RunAsync();
+			if (args.Contains("--ui") || args.Contains("--ui-close"))
+				await UiChecks.RunAsync(closingOnly: !args.Contains("--ui"));
 			if (args.Contains("--cloud"))
 				await RuntimeChecks.RunCloudAsync();
 			if (args.Contains("--mediator-native"))

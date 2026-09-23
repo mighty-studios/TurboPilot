@@ -255,6 +255,8 @@ internal sealed class FakeLocalRuntime : ILocalModelRuntime
 	public List<(string System, string Input, int Limit)> Requests { get; } = [];
 	public int Loads { get; private set; }
 	public int Unloads { get; private set; }
+	public int DisposeCalls { get; private set; }
+	public Func<ValueTask>? DisposeAction { get; set; }
 	public Exception? LoadError { get; set; }
 
 	public Task<IReadOnlyList<LocalModelDescriptor>> ListModelsAsync(CancellationToken cancellationToken = default) =>
@@ -289,5 +291,9 @@ internal sealed class FakeLocalRuntime : ILocalModelRuntime
 		return Task.CompletedTask;
 	}
 
-	public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+	public ValueTask DisposeAsync()
+	{
+		DisposeCalls++;
+		return DisposeAction?.Invoke() ?? ValueTask.CompletedTask;
+	}
 }

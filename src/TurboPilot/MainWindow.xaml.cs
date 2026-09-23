@@ -51,6 +51,7 @@ public partial class MainWindow : TurbolandWindow
 	private bool _sessionChanging;
 	private bool _sendingInput;
 	private bool _closing;
+	private bool _closeRequested;
 	private bool _closeApproved;
 	private readonly MediatorConfiguration _mediatorConfiguration;
 	private readonly ILocalModelRuntime _localRuntime;
@@ -1242,14 +1243,28 @@ public partial class MainWindow : TurbolandWindow
 		if (_closeApproved)
 			return;
 		e.Cancel = true;
-		if (_closing || !Dialogs.YesNoDialog.Ask(this, "Exit the Program?"))
+		if (_closeRequested)
 			return;
-		_closing = true;
-		await EndSessionAsync();
-		try { await _localRuntime.DisposeAsync(); }
-		catch (Exception ex) { MessageDialog.Ok(this, "Local runtime shutdown failed: " + ex.Message, "Mediator"); }
-		_closeApproved = true;
-		Close();
+		_closeRequested = true;
+		try
+		{
+			// Cleanup may finish synchronously. Leave WPF's Closing callback
+			// before showing dialogs or calling Close again.
+			await System.Windows.Threading.Dispatcher.Yield(
+				System.Windows.Threading.DispatcherPriority.Normal);
+			if (!Dialogs.YesNoDialog.Ask(this, "Exit the Program?"))
+				return;
+			_closing = true;
+			await EndSessionAsync();
+			try { await _localRuntime.DisposeAsync(); }
+			catch (Exception ex) { MessageDialog.Ok(this, "Local runtime shutdown failed: " + ex.Message, "Mediator"); }
+			_closeApproved = true;
+			Close();
+		}
+		finally
+		{
+			_closeRequested = false;
+		}
 	}
 
 	/// <summary>

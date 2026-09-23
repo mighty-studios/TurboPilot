@@ -24,6 +24,8 @@ Customization changes apply when starting or resuming a session. Automatic disco
 
 **Session -> Past Sessions** searches saved sessions by ID, workspace, or prompt. **View** opens a transcript without connecting. **Resume** restores the original conversation, workspace, model settings, usage, and prompt history, using the current customization and permission selections. Ending a session or exiting preserves its history.
 
+The window close button and **Session -> Exit** share one confirmation. Declining leaves the app running; accepting finishes cleanup before closing, without repeating the confirmation if another close request arrives.
+
 Original transcripts, prepared rendered transcripts, and metadata are stored under `%LOCALAPPDATA%\TurboPilot\sessions`. Both output versions are restored by View and Resume. Runtime conversation state remains in the SDK's session storage. Provider credentials are not copied into transcript metadata; resuming a session that used an API key requires the matching endpoint and key in Settings. Missing history, connection failures, and save failures are reported explicitly.
 
 ## Local Mediator
@@ -72,5 +74,7 @@ dotnet run --project .\tests\TurboPilot.Tests -- --runtime --ui
 ```
 
 The optional `--cloud` check sends one short synthetic prompt through the authenticated cloud service and may consume credits. It removes its test conversation afterward.
+
+`--ui-close` exercises the real exit-confirmation and cleanup paths without the other desktop flows.
 
 `--mediator-chat` runs the mediated runtime checks alone. `--mediator-native` queries compatible on-device models and exercises the default model if it is cached. Add `--download-mediator` to explicitly download that model first; the model stays cached for later use. The native check includes generation cancellation and all four processing contracts.
