@@ -9,7 +9,6 @@ using System.Windows.Threading;
 using Microsoft.Web.WebView2.Wpf;
 using TurboPilot.Ai;
 using TurboPilot.Dialogs;
-using TurboPilot.Mediation;
 
 namespace TurboPilot.Tests;
 
@@ -55,29 +54,13 @@ internal static class UiChecks
 		application.DispatcherUnhandledException += OnUnhandled;
 		try
 		{
-			for (var scenario = 0; scenario < 3; scenario++)
+			for (var scenario = 0; scenario < 2; scenario++)
 			{
 				using var workspace = new TestWorkspace();
 				await using var provider = new LocalProvider();
-				var runtime = new FakeLocalRuntime();
-				var releaseCleanup = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-				var cleanupStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-				runtime.DisposeAction = () =>
-				{
-					cleanupStarted.TrySetResult();
-					return scenario switch
-					{
-						1 => new ValueTask(releaseCleanup.Task),
-						2 => ValueTask.FromException(new InvalidOperationException("Fixture shutdown failure.")),
-						_ => ValueTask.CompletedTask,
-					};
-				};
 				TurbolandTheme.Wpf.TurbolandTheme.Apply(application, TurbolandTheme.Core.ThemeMode.Authentic);
 				var window = new MainWindow(workspace.Store, workspace.CreateChat, _ => new(),
-					Path.Combine(workspace.Root, "browser"), runtime,
-					new MediatorConfiguration(Path.Combine(workspace.Root, "mediator")),
-					(id, folder) => new MediatorService(id, folder, new MediatorSettings(), runtime,
-						new MediationStore(id, folder, Path.Combine(workspace.Root, "worklogs"))));
+					Path.Combine(workspace.Root, "browser"));
 				TurbolandTheme.Wpf.TurbolandTheme.ApplyTo(window);
 				var closed = false;
 				window.Closed += (_, _) => closed = true;
@@ -85,6 +68,8 @@ internal static class UiChecks
 				var browserExited = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 				var browserObserved = false;
 				LocalProvider.Reply? slowReply = null;
+				var sessionChange = Field<SemaphoreSlim>(window, "_sessionChange");
+				var sessionChangeHeld = false;
 				try
 				{
 					window.Show();
@@ -108,7 +93,7 @@ internal static class UiChecks
 							await window.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
 							Check.True(unhandled.Count == 0, "Declining exit must not throw: " + string.Join("\r\n", unhandled));
 							Check.True(!closed && window.IsVisible, "No and the confirmation close box must keep the main window open.");
-							Check.Equal(0, runtime.DisposeCalls, "Declining exit must not dispose the runtime");
+							Check.True(!Field<bool>(window, "_closing"), "Declining exit must not start shutdown.");
 						}
 					}
 					if (scenario == 1)
@@ -122,12 +107,15 @@ internal static class UiChecks
 						provider.Replies.Enqueue(slowReply);
 						await Field<ChatService>(window, "_chat").SendAsync("Keep this turn active.");
 						await slowReply.Started.Task.WaitAsync(TimeSpan.FromSeconds(15));
+						// An unfinished session change holds the exit cleanup until it completes.
+						await sessionChange.WaitAsync();
+						sessionChangeHeld = true;
 					}
 
 					var confirmations = 0;
 					var closeReturned = false;
 					var confirmationDeferred = false;
-					var shutdownNotices = 0;
+					var errorNotices = 0;
 					using var confirm = DialogAction<YesNoDialog>(application, dialog =>
 					{
 						confirmations++;
@@ -136,7 +124,7 @@ internal static class UiChecks
 					});
 					using var acknowledge = DialogAction<MessageDialog>(application, dialog =>
 					{
-						shutdownNotices++;
+						errorNotices++;
 						Invoke(dialog, "OnOk", dialog, new RoutedEventArgs());
 					});
 					window.Close();
@@ -144,26 +132,29 @@ internal static class UiChecks
 					window.Close();
 					if (scenario == 1)
 					{
-						await Check.UntilAsync(() => cleanupStarted.Task.IsCompleted || unhandled.Count > 0, "Asynchronous shutdown did not start.");
-						Check.True(!closed && !window.IsSessionActive, "End the active turn, then wait for local cleanup before closing.");
+						await Check.UntilAsync(() => Field<bool>(window, "_closing") || unhandled.Count > 0, "Asynchronous shutdown did not start.");
+						Check.True(!closed && window.IsSessionActive, "Wait for the unfinished session change before ending the session and closing.");
 						window.Close();
 						window.Close();
 						await window.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
-						Check.Equal(1, confirmations, "Do not repeat confirmation during asynchronous cleanup");
-						releaseCleanup.TrySetResult();
+						// The dialog helper answers only the first confirmation, so look for another one directly.
+						Check.True(!application.Windows.OfType<YesNoDialog>().Any(), "Do not repeat confirmation during asynchronous cleanup.");
+						sessionChange.Release();
+						sessionChangeHeld = false;
 					}
 					await Check.UntilAsync(() => closed || unhandled.Count > 0, "Confirmed shutdown did not close the window.");
 					await window.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
 					Check.True(unhandled.Count == 0, "Closing must not raise an unhandled exception: " + string.Join("\r\n", unhandled));
 					Check.True(closed && confirmationDeferred, "Leave the original Closing event before showing confirmation and closing again.");
 					Check.Equal(1, confirmations, "Confirm exit exactly once");
-					Check.Equal(1, runtime.DisposeCalls, "Dispose the local runtime exactly once");
-					Check.Equal(scenario == 2 ? 1 : 0, shutdownNotices, "Report runtime cleanup failures before exiting");
+					Check.True(!window.IsSessionActive, "End the session before closing.");
+					Check.Equal(0, errorNotices, "Exit without error notices");
 					Check.Equal(0, provider.Errors.Count, "Stop an active response without provider failures");
 				}
 				finally
 				{
-					releaseCleanup.TrySetResult();
+					if (sessionChangeHeld)
+						sessionChange.Release();
 					slowReply?.Release.TrySetResult();
 					if (!closed)
 					{
@@ -178,7 +169,7 @@ internal static class UiChecks
 						await browserExited.Task.WaitAsync(TimeSpan.FromSeconds(15));
 				}
 			}
-			Console.WriteLine("PASS real window-close confirmation, synchronous/asynchronous cleanup, repeated requests, and shutdown errors");
+			Console.WriteLine("PASS real window-close confirmation, synchronous and asynchronous cleanup, and repeated requests");
 		}
 		finally { application.DispatcherUnhandledException -= OnUnhandled; }
 	}
@@ -188,12 +179,8 @@ internal static class UiChecks
 		using var workspace = new TestWorkspace();
 		await using var provider = new LocalProvider();
 		var library = workspace.CreateLibrary();
-		var localRuntime = new FakeLocalRuntime();
-		var localConfiguration = new MediatorConfiguration(Path.Combine(workspace.Root, "window-mediator"));
 		TurbolandTheme.Wpf.TurbolandTheme.Apply(application, TurbolandTheme.Core.ThemeMode.Authentic);
-		var window = new MainWindow(workspace.Store, workspace.CreateChat, _ => library, Path.Combine(workspace.Root, "browser"),
-			localRuntime, localConfiguration, (id, folder) => new MediatorService(id, folder, localConfiguration.Load(),
-				localRuntime, new MediationStore(id, folder, Path.Combine(workspace.Root, "worklogs"))));
+		var window = new MainWindow(workspace.Store, workspace.CreateChat, _ => library, Path.Combine(workspace.Root, "browser"));
 		TurbolandTheme.Wpf.TurbolandTheme.ApplyTo(window);
 		var options = new ChatSessionOptions
 		{
@@ -212,7 +199,6 @@ internal static class UiChecks
 			window.Show();
 			await Check.UntilAsync(() => Field<bool>(window, "_webViewReady"), "The rendered output did not initialize.");
 			await CheckPromptLayoutAsync(window);
-			CheckMediatorDialog(window, workspace);
 
 			var starting = InvokeTask(window, "StartChatAsync", options, null);
 			Check.True(Status(window).StartsWith("Starting.."), "Show Starting while connecting.");
@@ -420,7 +406,7 @@ internal static class UiChecks
 		var body = (Grid)input.Parent;
 		var history = (Border)((Grid)Control<Button>(window, "buttonHistoryPrev").Parent).Parent;
 		var splitter = Control<Thumb>(window, "SplitterThumb");
-		var notice = Control<TextBlock>(window, "mediatorNotice");
+		var notice = Control<TextBlock>(window, "noticeTextBlock");
 		var outputRow = main.RowDefinitions[0];
 		var inputRow = main.RowDefinitions[2];
 		var originalSize = new Size(window.Width, window.Height);
@@ -515,51 +501,6 @@ internal static class UiChecks
 			window.Height = originalSize.Height;
 			await LayoutAsync();
 		}
-	}
-
-	private static void CheckMediatorDialog(MainWindow window, TestWorkspace workspace)
-	{
-		var configuration = new MediatorConfiguration(Path.Combine(workspace.Root, "mediator-dialog"));
-		var runtime = new FakeLocalRuntime
-		{
-			// Catalog names can be long enough to stretch a dialog sized to its content.
-			Models =
-			[
-				new(MediatorSettings.DefaultModelAlias, "Phi-3.5-mini-instruct-generic-cpu-with-an-exceptionally-long-catalog-name",
-					"CPU", 2590, true, 131072, "MIT"),
-				new("fixture-small", "Fixture Small", "GPU", 500, false, 8192, "MIT"),
-			],
-		};
-		var accepted = new MediatorDialog(configuration, runtime);
-		accepted.Loaded += (_, _) =>
-		{
-			var combo = Control<ComboBox>(accepted, "comboModel");
-			var selected = combo.SelectedItem as LocalModelDescriptor;
-			Check.Equal(MediatorSettings.DefaultModelAlias, selected?.Alias, "Select the preferred compatible model");
-			Check.Equal(MediatorSettings.DefaultModelAlias, combo.SelectionBoxItem?.ToString(), "Show the model alias in the closed drop-down");
-			accepted.UpdateLayout();
-			Check.True(accepted.ActualWidth <= 960, $"Keep the Mediator dialog within 960 pixels: {accepted.ActualWidth:0}");
-			Check.True(Control<TextBlock>(accepted, "textModelDetails").Text.Contains("exceptionally-long-catalog-name"), "Show the full model name in the details.");
-			Control<CheckBox>(accepted, "checkEnabled").IsChecked = true;
-			Control<CheckBox>(accepted, "checkDebug").IsChecked = true;
-			Check.True(Control<Button>(accepted, "buttonOk").IsEnabled, "Allow enabling a downloaded model.");
-			Click(accepted, "buttonOk");
-		};
-		Check.Equal(true, accepted.ShowDialog(window), "Save local options on OK");
-		var saved = configuration.Load();
-		Check.True(saved.Enabled && saved.DebugRaw, "Persist the selected flags.");
-		Check.Equal(0, runtime.Loads, "The settings dialog must not start generation.");
-		var canceled = new MediatorDialog(configuration, runtime);
-		canceled.Loaded += (_, _) =>
-		{
-			Control<ComboBox>(canceled, "comboModel").SelectedIndex = 1;
-			Check.True(!Control<Button>(canceled, "buttonOk").IsEnabled, "Require downloading a new model before enabling it.");
-			Control<CheckBox>(canceled, "checkDebug").IsChecked = false;
-			Invoke(canceled, "OnCancel", canceled, new RoutedEventArgs());
-		};
-		Check.Equal(false, canceled.ShowDialog(window), "Cancel the edited local options");
-		Check.Equal(saved, configuration.Load(), "Cancel must not persist edits");
-		Console.WriteLine("PASS Mediator dialog model selection, download gating, OK, and Cancel");
 	}
 
 	private static async Task ChoosePastSessionAsync(Application application, MainWindow window, string sessionId, string button)

@@ -76,14 +76,12 @@ internal static class RuntimeChecks
 			Check.True(!skills.Skills.Any(skill => skill.Name == "disabled-skill" && skill.Enabled), "The disabled sibling skill must not be discovered.");
 			Console.WriteLine("PASS runtime skill isolation");
 
-			chat.UserPromptFilter = text => "FILTERED: " + text;
-			chat.ModelOutputFilter = text => text.ToUpperInvariant();
 			provider.Replies.Enqueue(new LocalProvider.Reply("Hello streaming world."));
 			await SendAndWaitAsync(chat, "first prompt marker");
-			Check.True(chat.Transcript.Contains("HELLO STREAMING WORLD."), "Stream the filtered output.");
-			Check.True(chunks.Count(chunk => chunk.Contains("HELLO") || chunk.Contains("WORLD")) >= 2, "Display incremental text, not just a final response.");
+			Check.True(chat.Transcript.Contains("Hello streaming world."), "Stream the reply.");
+			Check.True(chunks.Count(chunk => chunk.Contains("Hello") || chunk.Contains("world")) >= 2, "Display incremental text, not just a final response.");
 			var request = provider.Requests.Single().GetRawText();
-			Check.True(request.Contains("FILTERED: first prompt marker"), "Apply the input interception hook.");
+			Check.True(request.Contains("first prompt marker"), "Send the prompt as written.");
 			Check.True(request.Contains("ENABLED_INSTRUCTION_SENTINEL") && request.Contains("ENABLED_SKILL_SENTINEL"), "Preload enabled content in the actual request.");
 			Check.True(!request.Contains("DISABLED_INSTRUCTION_SENTINEL") && !request.Contains("DISABLED_SKILL_SENTINEL"), "Exclude disabled content from the actual request.");
 			Check.True(!request.Contains("UNSELECTED_WORKSPACE_INSTRUCTION_SENTINEL"), "Disable implicit workspace instruction loading.");
@@ -95,7 +93,7 @@ internal static class RuntimeChecks
 			Check.Equal(0, errors.Count, "The running session must not hide errors");
 			await Check.ThrowsAsync<InvalidOperationException>(() => chat.StartAsync(options));
 			Check.Equal(sessionId, chat.SessionId, "A repeated start must not dispose the active session");
-			Console.WriteLine("PASS local-provider streaming, customization enforcement, hooks, context usage, and disk persistence");
+			Console.WriteLine("PASS local-provider streaming, customization enforcement, context usage, and disk persistence");
 		}
 
 		await using (var resumed = workspace.CreateChat())

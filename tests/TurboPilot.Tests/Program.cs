@@ -7,8 +7,6 @@ internal static class Program
 		try
 		{
 			await CoreChecks.RunAsync();
-			MediatorChecks.RunFoundation();
-			await MediatorChecks.RunParkedAsync();
 			RenderingChecks.Run();
 			if (args.Contains("--runtime"))
 			{
@@ -19,8 +17,6 @@ internal static class Program
 				await UiChecks.RunAsync(closingOnly: !args.Contains("--ui"));
 			if (args.Contains("--cloud"))
 				await RuntimeChecks.RunCloudAsync();
-			if (args.Contains("--mediator-native"))
-				await MediatorChecks.RunNativeAsync(args.Contains("--download-mediator"));
 			if (args.Contains("--session-features") && !args.Contains("--runtime"))
 				await SessionFeatureChecks.RunAsync();
 			Console.WriteLine("All requested checks passed.");

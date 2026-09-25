@@ -46,26 +46,27 @@ Task list:
 
 - [x] Dual output views
 - [x] Raw is the source of truth
-- [ ] Mediator prompt optimization
+- [ ] Customization item details
 - [ ] Session history browser
 
 ## 5. Code 🧪
 
 ```csharp
-// The Mediator reduces a rambling prompt into one clear instruction.
-using Microsoft.AI.Foundry.Local;
+// Links a bare file name only when exactly one workspace file matches it.
+using System.IO;
 
-var manager = await FoundryLocalManager.CreateAsync(new Configuration { AppName = "TurboPilot" });
-var catalog = await manager.GetCatalogAsync();
-var model = await catalog.GetModelAsync("phi-3.5-mini");
+var options = new EnumerationOptions { RecurseSubdirectories = true };
+var matches = Directory.EnumerateFiles(workspace, name, options)
+    .Where(path => !path.Contains(@"\bin\") && !path.Contains(@"\obj\"))
+    .Take(2)
+    .ToList();
 
-await model.DownloadAsync(progress => Console.WriteLine($"Downloaded {progress}%"));
-var client = await model.GetChatClientAsync();
+await File.AppendAllTextAsync(logPath, $"Found {matches.Count} match(es)\r\n");
 
-string Reduce(string prompt)
+string Link(string text)
 {
-    // Never invent requirements the user did not state.
-    return string.IsNullOrWhiteSpace(prompt) ? prompt : prompt.Trim();
+    // Never guess between two candidates.
+    return matches.Count == 1 ? $"[{text}](kp-path:{Uri.EscapeDataString(matches[0])})" : text;
 }
 ```
 
@@ -73,7 +74,7 @@ string Reduce(string prompt)
 
 | Purpose  | Model        | Host          | Streaming |
 | -------- | ------------ | ------------- | :-------: |
-| Planning | phi-3.5-mini | Foundry Local |    Yes    |
+| Planning | qwen3-8b     | Lemonade      |    Yes    |
 | Coding   | gpt-4o       | Cloud         |    Yes    |
 | Vision   | llama-3.2-vl | Local         |    No     |
 | Listening| whisper      | Local         |    No     |
@@ -82,11 +83,11 @@ string Reduce(string prompt)
 
 ```mermaid
 flowchart TD
-    U([User prompt]) --> M{Mediator}
-    M -->|attachment| V[Vision or Listening pass]
-    M -->|plain text| P[Reduce to one instruction]
-    V --> P
-    P --> R[Remote LLM]
+    U([User prompt]) --> A{Attachments?}
+    A -->|yes| F[Add files and images]
+    A -->|no| S[Send as written]
+    F --> S
+    S --> R[Remote LLM]
     R --> O[Raw transcript]
     O --> W[Rendered WebView2]
 ```
@@ -94,17 +95,17 @@ flowchart TD
 ```mermaid
 sequenceDiagram
     participant U as User
-    participant M as Mediator
+    participant T as TurboPilot
     participant L as Remote LLM
-    U->>M: Craft a prompt
-    activate M
-    M->>L: Optimized instruction
+    U->>T: Craft a prompt
+    activate T
+    T->>L: Prompt and attachments
     activate L
-    L-->>M: Streamed tokens
+    L-->>T: Streamed tokens
     deactivate L
-    M-->>U: Raw plus Rendered
-    deactivate M
-    Note over U,M: Both tabs always show the same bytes
+    T-->>U: Raw plus Rendered
+    deactivate T
+    Note over U,T: Both tabs always show the same bytes
 ```
 
 ```mermaid

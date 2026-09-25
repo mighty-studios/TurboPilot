@@ -1,7 +1,6 @@
 using System.IO;
 using GitHub.Copilot;
 using TurboPilot.Ai;
-using TurboPilot.Mediation;
 using TurboPilot.Permissions;
 using TurboPilot.Sessions;
 
@@ -29,9 +28,9 @@ internal static class SessionFeatureChecks
 		await CheckRenderedLinksAsync(workspace, provider, options);
 		await CheckLiveChangesAsync(workspace, provider, options);
 		await CheckHandoffAsync(workspace, provider, options);
-		await CheckMediatorCaptureAsync(workspace, provider, options);
+		await CheckAgenticLinksAsync(workspace, provider, options);
 		Check.Equal(0, provider.Errors.Count, "The loopback provider must not hide failures: " + string.Join(" | ", provider.Errors));
-		Console.WriteLine("PASS session features: Rendered links, live changes, SDK hand-off restarts, and parked Mediator capture");
+		Console.WriteLine("PASS session features: Rendered links, live changes, and SDK hand-off restarts");
 	}
 
 	private static void CheckClassification(TestWorkspace workspace, ChatSessionOptions options)
@@ -214,58 +213,32 @@ internal static class SessionFeatureChecks
 		Check.Equal("Plain reply.", ChatService.HandoffSummary(" Plain reply. "), "Use an untagged reply as the summary");
 	}
 
-	private static async Task CheckMediatorCaptureAsync(TestWorkspace workspace, LocalProvider provider, ChatSessionOptions options)
+	// Narration that accompanies a tool call is linked as well as the final answer, across a
+	// permission request and a model question in the same turn.
+	private static async Task CheckAgenticLinksAsync(TestWorkspace workspace, LocalProvider provider, ChatSessionOptions options)
 	{
-		var runtime = new FakeLocalRuntime();
-		var worklogs = Path.Combine(workspace.Root, "worklogs");
-		ChatService CreateChat(bool enabled)
-		{
-			var chat = workspace.CreateChat();
-			chat.MediatorFactory = (id, folder) => new MediatorService(id, folder, new MediatorSettings { Enabled = enabled }, runtime,
-				new MediationStore(id, folder, worklogs));
-			return chat;
-		}
 		var scopeKey = PermissionService.MakeKey(workspace.Workspace);
 		var scopes = PermissionService.Current.Workspaces;
 		scopes.TryGetValue(scopeKey, out var originalScope);
 		scopes[scopeKey] = new PermissionScope { Operations = [] };
 		try
 		{
-			await using (var turn = CreateChat(enabled: true))
-			{
-				await turn.StartAsync(options);
-				provider.Replies.Enqueue(new LocalProvider.Reply("Checking `README.md` before answering.", ToolName: "powershell",
-					ToolArguments: """{"command":"Write-Output MediatedToolProbe","description":"Write a fixture marker"}"""));
-				provider.Replies.Enqueue(new LocalProvider.Reply("", ToolName: "ask_user",
-					ToolArguments: """{"question":"Which summary style?","choices":["short","long"],"allowFreeform":false}"""));
-				provider.Replies.Enqueue(new LocalProvider.Reply("Results\r\n\r\nSee `README.md`."));
-				await turn.SendAsync("Review README.md.");
-				await Check.UntilAsync(() => turn.HasPendingQuestion && turn.Transcript.Contains("Permission requested"), "The permission request did not wait.");
-				await turn.SendAsync("1");
-				await Check.UntilAsync(() => turn.HasPendingQuestion && turn.Transcript.Contains("Which summary style?"), "The model question did not wait.");
-				await turn.SendAsync("2");
-				await Check.UntilAsync(() => !turn.IsWorking && !turn.HasPendingQuestion && turn.Transcript.Contains("See `README.md`."),
-					"The agentic turn did not finish.", timeoutSeconds: 30);
-				await turn.WhenRenderedAsync();
-				Check.Equal(0, runtime.Requests.Count, "The parked Mediator only reads the conversation");
-				Check.True(turn.RenderedTranscript.Split("kp-path:").Length - 1 >= 2, "Link files in narration and in the answer.");
-				var worklog = new MediationStore(turn.SessionId!, workspace.Workspace, worklogs).Load(turn.SessionId!, workspace.Workspace);
-				Check.Equal("user,assistant,answer,assistant", string.Join(",", worklog.Entries.Where(entry => entry.Role != "tool").Select(entry => entry.Role)),
-					"Record the turn without permission replies or empty tool-request messages");
-				var shell = worklog.Entries.FirstOrDefault(entry => entry.Role == "tool" && entry.Content.StartsWith("powershell succeeded"));
-				Check.True(shell?.Content.Contains("MediatedToolProbe") == true, "Record a compact tool result with its tool name.");
-				var answer = worklog.Entries.Single(entry => entry.Role == "answer");
-				Check.True(answer.Content.Contains("Which summary style?") && answer.Content.Contains("Answer: long"),
-					"Record a model question's answer with the question: " + answer.Content);
-			}
-			await using (var parked = CreateChat(enabled: false))
-			{
-				await parked.StartAsync(options);
-				provider.Replies.Enqueue(new LocalProvider.Reply("Nothing recorded."));
-				await RuntimeChecks.SendAndWaitAsync(parked, "Record nothing.");
-				Check.True(!Directory.Exists(new MediationStore(parked.SessionId!, workspace.Workspace, worklogs).DirectoryPath),
-					"Record nothing while the Mediator is disabled.");
-			}
+			await using var turn = workspace.CreateChat();
+			await turn.StartAsync(options);
+			provider.Replies.Enqueue(new LocalProvider.Reply("Checking `README.md` before answering.", ToolName: "powershell",
+				ToolArguments: """{"command":"Write-Output ToolProbe","description":"Write a fixture marker"}"""));
+			provider.Replies.Enqueue(new LocalProvider.Reply("", ToolName: "ask_user",
+				ToolArguments: """{"question":"Which summary style?","choices":["short","long"],"allowFreeform":false}"""));
+			provider.Replies.Enqueue(new LocalProvider.Reply("Results\r\n\r\nSee `README.md`."));
+			await turn.SendAsync("Review README.md.");
+			await Check.UntilAsync(() => turn.HasPendingQuestion && turn.Transcript.Contains("Permission requested"), "The permission request did not wait.");
+			await turn.SendAsync("1");
+			await Check.UntilAsync(() => turn.HasPendingQuestion && turn.Transcript.Contains("Which summary style?"), "The model question did not wait.");
+			await turn.SendAsync("2");
+			await Check.UntilAsync(() => !turn.IsWorking && !turn.HasPendingQuestion && turn.Transcript.Contains("See `README.md`."),
+				"The agentic turn did not finish.", timeoutSeconds: 30);
+			await turn.WhenRenderedAsync();
+			Check.True(turn.RenderedTranscript.Split("kp-path:").Length - 1 >= 2, "Link files in narration and in the answer.");
 		}
 		finally
 		{

@@ -65,7 +65,6 @@
                 <MenuItem x:Name="menuPastSessions" Header="_Past Sessions..." Click="OnPastSessions"/>
                 <Separator/>
                 <MenuItem x:Name="menuSettings" Header="Set_tings..." Click="OnSettings"/>
-                <MenuItem x:Name="menuMediator" Header="_Mediator..." Click="OnMediator"/>
                 <MenuItem Header="C_ustomization..." Click="OnCustomization"/>
                 <MenuItem Header="Pe_rmissions..." Click="OnPermissions"/>
                 <Separator/>
@@ -226,7 +225,7 @@
                             </Style>
                         </RichTextBox.Resources>
                     </RichTextBox>
-                    <TextBlock x:Name="mediatorNotice" Grid.Row="1" Margin="4,4,4,0"
+                    <TextBlock x:Name="noticeTextBlock" Grid.Row="1" Margin="4,4,4,0"
 							TextWrapping="Wrap" MaxHeight="68" Visibility="Collapsed"
 							Foreground="{DynamicResource Turboland.Brush.WindowForeground}"/>
                 </Grid>

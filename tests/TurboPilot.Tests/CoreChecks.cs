@@ -163,7 +163,7 @@ internal static class CoreChecks
 
 	private static async Task CheckEventsAsync()
 	{
-		await using var chat = new ChatService { ModelOutputFilter = text => text.ToUpperInvariant() };
+		await using var chat = new ChatService();
 		var displayed = new StringBuilder();
 		var errors = new List<string>();
 		chat.TranscriptReceived += text => displayed.Append(text);
@@ -173,7 +173,7 @@ internal static class CoreChecks
 		chat.HandleSessionEvent(SessionEvent.FromJson("""{"type":"assistant.message","data":{"messageId":"m1","content":"streamed"}}"""));
 		chat.HandleSessionEvent(SessionEvent.FromJson("""{"type":"assistant.message","data":{"messageId":"m2","content":"final only"}}"""));
 		chat.HandleSessionEvent(SessionEvent.FromJson("""{"type":"assistant.message","agentId":"child","data":{"messageId":"m3","content":"do not duplicate subagent output"}}"""));
-		Check.Equal("STREAMED\r\n\r\nFINAL ONLY\r\n\r\n", displayed.ToString(), "Deduplicate by message, not by turn, and apply the output filter");
+		Check.Equal("streamed\r\n\r\nfinal only\r\n\r\n", displayed.ToString(), "Deduplicate by message, not by turn");
 		chat.HandleSessionEvent(SessionEvent.FromJson("""{"type":"assistant.usage","data":{"model":"fixture","inputTokens":20480,"copilotUsage":{"totalNanoAiu":13000000000}}}"""));
 		chat.HandleSessionEvent(SessionEvent.FromJson("""{"type":"assistant.usage","agentId":"child","data":{"model":"fixture","initiator":"sub-agent","inputTokens":7,"copilotUsage":{"totalNanoAiu":1000000000}}}"""));
 		Check.Equal(20480, chat.ContextUsedTokens, "Subagent usage must not replace the main context meter");

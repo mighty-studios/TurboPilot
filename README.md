@@ -38,13 +38,6 @@ The window close button and **Session -> Exit** share one confirmation. Declinin
 
 Original transcripts, prepared rendered transcripts, and metadata are stored under `%LOCALAPPDATA%\TurboPilot\sessions`. Both output versions are restored by View and Resume. Runtime conversation state remains in the SDK's session storage. Provider credentials are not copied into transcript metadata; resuming a session that used an API key requires the matching endpoint and key in Settings. Missing history, connection failures, and save failures are reported explicitly.
 
-## Local Mediator
-
-The Mediator is an on-device language model, currently parked for a future purpose. It is off by default, and settings saved by earlier versions load it disabled. It never changes what is sent to the session model or shown in chat.
-
-**Session -> Mediator** lists text models compatible with the installed local execution providers; the preferred model is `phi-3.5-mini`. **Download Model** caches a model before it can be enabled, and **Prepare Acceleration** installs available GPU/NPU execution providers and refreshes the catalog. CPU execution is available without that optional preparation. Options are saved only on **OK**, and downloads are kept when the dialog is canceled.
-
-When enabled, the Mediator records prompts, answers to model questions, replies, and short tool-result excerpts in a local worklog under `%LOCALAPPDATA%\TurboPilot\workspaces\<workspace-key>\sessions\<session-id>`. Permission replies and messages that only request tools are not recorded, and nothing is recorded while it is disabled. **Show Mediator diagnostics in Raw only** displays local model requests and responses in Raw; none are made by this version. Local calls use a practical budget of 4,096 locally counted tokens and a default 60-second timeout, and three consecutive failures disable local inference until the options are applied again. The model cache and local runtime logs are under `%LOCALAPPDATA%\TurboPilot\foundry`.
 ## Build
 
 Windows and the .NET 9 SDK or later are required. WebView2 Runtime is required for rendered output.
@@ -72,4 +65,4 @@ The optional `--cloud` check sends one short synthetic prompt through the authen
 
 `--ui-close` exercises the real exit-confirmation and cleanup paths without the other desktop flows.
 
-`--session-features` runs the file-link, live-change, hand-off, and Mediator capture checks alone. `--mediator-native` queries compatible on-device models and exercises the default model if it is cached. Add `--download-mediator` to explicitly download that model first; the model stays cached for later use. The native check includes generation cancellation and a generation through the parked Mediator.
+`--session-features` runs the file-link, live-change, and hand-off checks alone.

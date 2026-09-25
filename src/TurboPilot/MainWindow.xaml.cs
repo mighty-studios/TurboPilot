@@ -9,7 +9,6 @@ using TurboPilot.Ai;
 using TurboPilot.Customizations;
 using TurboPilot.Dialogs;
 using TurboPilot.Sessions;
-using TurboPilot.Mediation;
 
 namespace TurboPilot;
 
@@ -25,7 +24,7 @@ public partial class MainWindow : TurbolandWindow
 	private bool _rawOpenedAtTop = false;
 
 	// Raw preserves streamed text; Rendered can replace completed messages
-	// with prepared formatting without exposing local diagnostic traffic.
+	// with prepared formatting.
 	private readonly StringBuilder _outputText = new();
 	private readonly StringBuilder _renderedText = new();
 	private readonly System.Windows.Documents.Run _rawOutputRun = new();
@@ -53,9 +52,6 @@ public partial class MainWindow : TurbolandWindow
 	private bool _closing;
 	private bool _closeRequested;
 	private bool _closeApproved;
-	private readonly MediatorConfiguration _mediatorConfiguration;
-	private readonly ILocalModelRuntime _localRuntime;
-	private readonly Func<string, string?, IMediatorSession>? _createMediator;
 
 	// Model id and session id of the live session, shown in the
 	// sessionInfo badge. Both null while no session is running.
@@ -75,16 +71,11 @@ public partial class MainWindow : TurbolandWindow
 	}
 
 	internal MainWindow(SessionStore sessionStore, Func<ChatService>? createChat = null,
-		Func<string?, CustomizationLibrary>? collectCustomizations = null, string? webViewDataFolder = null,
-		ILocalModelRuntime? localRuntime = null, MediatorConfiguration? mediatorConfiguration = null,
-		Func<string, string?, IMediatorSession>? createMediator = null)
+		Func<string?, CustomizationLibrary>? collectCustomizations = null, string? webViewDataFolder = null)
 	{
 		_sessionStore = sessionStore;
 		_createChat = createChat ?? (() => new ChatService(_sessionStore));
 		_collectCustomizations = collectCustomizations ?? CustomizationService.Rescan;
-		_localRuntime = localRuntime ?? new FoundryModelRuntime();
-		_mediatorConfiguration = mediatorConfiguration ?? new MediatorConfiguration();
-		_createMediator = createMediator;
 		_webViewDataFolder = webViewDataFolder ?? System.IO.Path.Combine(
 			Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TurboPilot", "webview2-default");
 		InitializeComponent();
@@ -158,7 +149,6 @@ public partial class MainWindow : TurbolandWindow
 		menuNewSession.IsEnabled = !_sessionChanging && !_closing;
 		menuPastSessions.IsEnabled = !_sessionChanging && !_closing;
 		menuSettings.IsEnabled = !_sessionChanging && !_closing;
-		menuMediator.IsEnabled = !_sessionChanging && !_closing;
 
 		richTextBoxInput.IsEnabled = ready;
 		UpdateHistoryButtons();
@@ -523,7 +513,7 @@ public partial class MainWindow : TurbolandWindow
 	// ── Output API ───────────────────────────────────────────────────────────
 	//
 	// Common notices go to both views. Chat events keep Raw text separate
-	// from prepared Rendered content and optional local diagnostics.
+	// from prepared Rendered content.
 
 	/// <summary>
 	/// The full verbatim transcript currently displayed in the Raw tab.
@@ -589,12 +579,6 @@ public partial class MainWindow : TurbolandWindow
 	{
 		_renderedText.Clear().Append(text);
 		PushToRenderer($"setTranscript({JsString(text)})");
-	}
-
-	private void ReplaceRawOutput(string text)
-	{
-		_outputText.Clear().Append(text);
-		_rawOutputRun.Text = text;
 	}
 
 	/// <summary>
@@ -883,18 +867,11 @@ public partial class MainWindow : TurbolandWindow
 			cancellation.Token.ThrowIfCancellationRequested();
 
 			var chat = _createChat();
-			chat.MediatorFactory ??= _createMediator ?? ((id, workspace) => new MediatorService(
-				id, workspace, _mediatorConfiguration.Load(), _localRuntime));
 			_chat = chat;
 			chat.TranscriptReceived += text => ForActiveChat(chat, () => AppendRawOutput(text));
 			chat.RenderedReceived += text => ForActiveChat(chat, () => AppendRenderedOutput(text));
 			chat.RenderedReplaced += text => ForActiveChat(chat, () => ReplaceRenderedOutput(text));
 			chat.NoticeReceived += text => ForActiveChat(chat, () => ShowNotice(text));
-			chat.MediatorDiagnosticReceived += diagnostic => ForActiveChat(chat, () =>
-			{
-				if (chat.DebugRaw)
-					AppendRawOutput($"\r\n[mediator {diagnostic.Purpose}]\r\nInput: {diagnostic.Input}\r\nOutput: {diagnostic.Output}\r\n{diagnostic.Note}\r\n");
-			});
 			chat.ErrorReceived += text => ForActiveChat(chat, () => AppendOutput($"\r\n[error] {text}\r\n\r\n"));
 			chat.StateChanged += () => ForActiveChat(chat, RefreshChatState);
 			chat.UsageChanged += () => ForActiveChat(chat, () =>
@@ -908,8 +885,8 @@ public partial class MainWindow : TurbolandWindow
 			});
 
 			ClearOutput();
-			mediatorNotice.Text = "";
-			mediatorNotice.Visibility = Visibility.Collapsed;
+			noticeTextBlock.Text = "";
+			noticeTextBlock.Visibility = Visibility.Collapsed;
 			_statusBase = "Starting..";
 			_sessionModel = options.Model;
 			_ctxTotal = options.ContextWindowTokens;
@@ -1042,8 +1019,6 @@ public partial class MainWindow : TurbolandWindow
 		}
 
 		statusTextBlock.Text = FormatStatus(_statusBase, _ctxUsed, _ctxTotal, _aic, _showAic);
-		if (_chat?.MediationStatus is "Mediator offline" or "Mediator disabled" or "Mediator error")
-			statusTextBlock.Text += " Med=" + _chat.MediationStatus[9..];
 	}
 
 	internal static string FormatStatus(string status, int used, int total, double credits, bool showCredits)
@@ -1182,30 +1157,11 @@ public partial class MainWindow : TurbolandWindow
 		new Dialogs.PermissionsDialog(ActiveWorkspacePath).ShowDialog(this);
 	}
 
-	private async void OnMediator(object sender, RoutedEventArgs e)
-	{
-		try
-		{
-			var dialog = new MediatorDialog(_mediatorConfiguration, _localRuntime);
-			if (dialog.ShowDialog(this) == true && dialog.Result is { } options && _chat is { } chat)
-			{
-				await chat.ConfigureMediatorAsync(options);
-				ForActiveChat(chat, () =>
-				{
-					if (!chat.DebugRaw)
-						ReplaceRawOutput(chat.Transcript);
-					ShowNotice(options.Enabled ? "Mediator: enabled; it records this conversation locally." : "Mediator: disabled.");
-				});
-			}
-		}
-		catch (Exception ex) { MessageDialog.Ok(this, "Cannot open Mediator settings: " + ex.Message, "Mediator"); }
-	}
-
 	private void ShowNotice(string text)
 	{
-		mediatorNotice.Text = text;
-		mediatorNotice.ToolTip = text;
-		mediatorNotice.Visibility = Visibility.Visible;
+		noticeTextBlock.Text = text;
+		noticeTextBlock.ToolTip = text;
+		noticeTextBlock.Visibility = Visibility.Visible;
 	}
 
 	// -- Exit ------------------------------------------------------------------
@@ -1233,8 +1189,6 @@ public partial class MainWindow : TurbolandWindow
 				return;
 			_closing = true;
 			await EndSessionAsync();
-			try { await _localRuntime.DisposeAsync(); }
-			catch (Exception ex) { MessageDialog.Ok(this, "Local runtime shutdown failed: " + ex.Message, "Mediator"); }
 			_closeApproved = true;
 			Close();
 		}
