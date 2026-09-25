@@ -83,6 +83,8 @@ internal static class RuntimeChecks
 			var request = provider.Requests.Single().GetRawText();
 			Check.True(request.Contains("first prompt marker"), "Send the prompt as written.");
 			Check.True(request.Contains("ENABLED_INSTRUCTION_SENTINEL") && request.Contains("ENABLED_SKILL_SENTINEL"), "Preload enabled content in the actual request.");
+			Check.True(request.Contains("TurboPilot application instructions") && request.Contains("kp-path:encoded-absolute-path"),
+				"Send the central presentation instructions alongside enabled customizations.");
 			Check.True(!request.Contains("DISABLED_INSTRUCTION_SENTINEL") && !request.Contains("DISABLED_SKILL_SENTINEL"), "Exclude disabled content from the actual request.");
 			Check.True(!request.Contains("UNSELECTED_WORKSPACE_INSTRUCTION_SENTINEL"), "Disable implicit workspace instruction loading.");
 			Check.True(chat.Transcript.Contains("**You:** first prompt marker"), "Preserve the user's original prompt.");
@@ -96,6 +98,7 @@ internal static class RuntimeChecks
 			Console.WriteLine("PASS local-provider streaming, customization enforcement, context usage, and disk persistence");
 		}
 
+		File.WriteAllText(workspace.ApplicationInstructionsPath, "EDITED_APPLICATION_INSTRUCTIONS_SENTINEL");
 		await using (var resumed = workspace.CreateChat())
 		{
 			await resumed.ResumeAsync(sessionId, options).WaitAsync(TimeSpan.FromSeconds(45));
@@ -105,6 +108,7 @@ internal static class RuntimeChecks
 			await SendAndWaitAsync(resumed, "second prompt marker");
 			var request = provider.Requests.Last().GetRawText();
 			Check.True(request.Contains("first prompt marker") && request.Contains("Hello streaming world."), "Restore the actual conversation context, not only the display.");
+			Check.True(request.Contains("EDITED_APPLICATION_INSTRUCTIONS_SENTINEL"), "Read the edited central instructions into the resumed runtime.");
 			Check.Equal(resumed.Transcript, workspace.Store.ReadTranscript(sessionId), "Continue the same persisted transcript");
 			Console.WriteLine("PASS cold resume with restored runtime context and prompt history");
 

@@ -21,6 +21,7 @@ public sealed class ChatService : IAsyncDisposable
 	private readonly StringBuilder _transcript = new();
 	private readonly SessionStore _store;
 	private readonly Func<ChatSessionOptions, CopilotClient> _createClient;
+	private readonly string? _applicationInstructionsPath;
 	private CopilotClient? _client;
 	private CopilotSession? _session;
 	private ChatSessionOptions _options = new();
@@ -52,10 +53,12 @@ public sealed class ChatService : IAsyncDisposable
 	{
 	}
 
-	internal ChatService(SessionStore store, Func<ChatSessionOptions, CopilotClient> createClient)
+	internal ChatService(SessionStore store, Func<ChatSessionOptions, CopilotClient> createClient,
+		string? applicationInstructionsPath = null)
 	{
 		_store = store;
 		_createClient = createClient;
+		_applicationInstructionsPath = applicationInstructionsPath;
 	}
 
 	// Callbacks may arrive on worker threads.
@@ -150,7 +153,7 @@ public sealed class ChatService : IAsyncDisposable
 			SessionConfigBase config = resumeId is null
 				? new SessionConfig { SessionId = SessionId }
 				: new ResumeSessionConfig { ContinuePendingWork = false };
-			SessionConfiguration.Apply(config, _options);
+			SessionConfiguration.Apply(config, _options, _applicationInstructionsPath);
 			config.OnPermissionRequest = HandlePermissionRequestAsync;
 			config.OnUserInputRequest = HandleUserInputRequestAsync;
 			config.OnExitPlanModeRequest = HandleExitPlanModeRequestAsync;

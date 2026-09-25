@@ -13,6 +13,7 @@ internal static class CoreChecks
 	public static async Task RunAsync()
 	{
 		CheckConfiguration();
+		CheckApplicationInstructions();
 		CheckStorage();
 		await CheckQuestionsAsync();
 		await CheckEventsAsync();
@@ -38,7 +39,7 @@ internal static class CoreChecks
 			Customizations = library,
 		};
 		var config = new SessionConfig();
-		SessionConfiguration.Apply(config, options);
+		SessionConfiguration.Apply(config, options, workspace.ApplicationInstructionsPath);
 		var system = config.SystemMessage!.Content!;
 		Check.True(system.Contains("ENABLED_INSTRUCTION_SENTINEL") && system.Contains("ENABLED_SKILL_SENTINEL"), "Enabled content must be preloaded.");
 		Check.True(!system.Contains("DISABLED_"), "Disabled content must not be preloaded.");
@@ -60,24 +61,61 @@ internal static class CoreChecks
 		Check.True(!system.Contains("fixture-value"), "Server credentials must not enter the system prompt.");
 
 		var resume = new ResumeSessionConfig();
-		SessionConfiguration.Apply(resume, options with { ApplyInstructions = false, PreloadSkills = false });
+		SessionConfiguration.Apply(resume, options with { ApplyInstructions = false, PreloadSkills = false }, workspace.ApplicationInstructionsPath);
 		Check.True(!resume.SystemMessage!.Content!.Contains("_SENTINEL"), "Both loading switches must apply to resumed sessions.");
 		Check.Equal(false, resume.EnableSkills, "Preload off must disable automatic skill loading");
 		Check.Equal(0, resume.SkillDirectories!.Count, "Preload off must not register skill folders");
 		Check.Equal(0, resume.CustomAgents![0].Skills!.Count, "Preload off must also apply to custom agents");
-		Check.Throws<InvalidOperationException>(() => SessionConfiguration.Apply(new SessionConfig(), options with { Mode = "disabled-agent" }));
-		Check.Throws<InvalidOperationException>(() => SessionConfiguration.Apply(new SessionConfig(), options with { UseByok = true }));
+		Check.Throws<InvalidOperationException>(() => SessionConfiguration.Apply(new SessionConfig(), options with { Mode = "disabled-agent" }, workspace.ApplicationInstructionsPath));
+		Check.Throws<InvalidOperationException>(() => SessionConfiguration.Apply(new SessionConfig(), options with { UseByok = true }, workspace.ApplicationInstructionsPath));
 
 		var provider = new SessionConfig();
 		SessionConfiguration.Apply(provider, options with
 		{
 			UseByok = true, ByokEndpoint = "http://127.0.0.1:5001/v1", ByokApiKey = "fixture-key", ContextWindowTokens = 32768,
-		});
+		}, workspace.ApplicationInstructionsPath);
 		Check.Equal("http://127.0.0.1:5001/v1", provider.Provider!.BaseUrl, "Use the selected endpoint");
 		Check.Equal("fixture-key", provider.Provider.ApiKey, "Use the selected credential only for the provider");
 		Check.True(provider.Provider.MaxPromptTokens == 32768, "Apply the selected context limit.");
 		var malformed = workspace.Write("malformed.md", "---\nname: [broken\n---\nbody");
 		Check.Throws<YamlDotNet.Core.YamlException>(() => FrontMatter.ReadDocument(malformed));
+	}
+
+	private static void CheckApplicationInstructions()
+	{
+		using var workspace = new TestWorkspace();
+		var path = workspace.ApplicationInstructionsPath;
+		var options = new ChatSessionOptions { Customizations = workspace.CreateLibrary() };
+		var config = new SessionConfig();
+		SessionConfiguration.Apply(config, options, path);
+		var initial = File.ReadAllBytes(path);
+		var content = config.SystemMessage!.Content!;
+		Check.Equal(SystemMessageMode.Append, config.SystemMessage.Mode, "Append instead of replacing the runtime instructions");
+		Check.True(content.Contains("Markdown") && content.Contains("mermaid") && content.Contains("![")
+			&& content.Contains("kp-path:") && content.Contains("https://"), "Provision presentation guidance for all supported visuals");
+		Check.True(content.IndexOf("TurboPilot application instructions") > content.IndexOf("ENABLED_INSTRUCTION_SENTINEL"),
+			"Append app guidance after enabled instructions.");
+		Check.True(!content.Contains("description: 'Presentation"), "Do not send instruction front matter.");
+		SessionConfiguration.Apply(new SessionConfig(), options, path);
+		Check.True(initial.SequenceEqual(File.ReadAllBytes(path)), "Do not rewrite an existing file.");
+
+		File.WriteAllText(path, "USER_EDITED_APP_GUIDANCE");
+		var resume = new ResumeSessionConfig();
+		SessionConfiguration.Apply(resume, options with { ApplyInstructions = false, PreloadSkills = false }, path);
+		Check.True(resume.SystemMessage!.Content!.Contains("USER_EDITED_APP_GUIDANCE")
+			&& !resume.SystemMessage.Content.Contains("ENABLED_INSTRUCTION_SENTINEL"), "Reload user edits on resume, independently of workspace instruction loading.");
+		SessionConfiguration.Apply(config, options, path);
+		Check.True(config.SystemMessage!.Content!.Contains("USER_EDITED_APP_GUIDANCE"), "Reload edits for new sessions too.");
+		File.WriteAllText(path, "");
+		SessionConfiguration.Apply(config, options, path);
+		Check.Equal("", File.ReadAllText(path), "An intentionally empty file must not restore the defaults.");
+		File.WriteAllText(path, "---\ndescription: [broken\n---\nbody");
+		Check.Throws<InvalidOperationException>(() => SessionConfiguration.Apply(config, options, path));
+		using (var locked = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+			Check.Throws<InvalidOperationException>(() => SessionConfiguration.Apply(config, options, path));
+		File.Delete(path);
+		SessionConfiguration.Apply(config, options, path);
+		Check.True(initial.SequenceEqual(File.ReadAllBytes(path)), "Recreate missing defaults.");
 	}
 
 	private static void CheckStorage()

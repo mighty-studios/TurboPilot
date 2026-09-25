@@ -7,7 +7,7 @@ namespace TurboPilot.Ai;
 
 internal static class SessionConfiguration
 {
-	public static void Apply(SessionConfigBase config, ChatSessionOptions options)
+	public static void Apply(SessionConfigBase config, ChatSessionOptions options, string? applicationInstructionsPath = null)
 	{
 		config.Model = string.IsNullOrWhiteSpace(options.Model) ? null : options.Model;
 		config.ReasoningEffort = string.IsNullOrWhiteSpace(options.ReasoningEffort) ? null : options.ReasoningEffort;
@@ -24,12 +24,7 @@ internal static class SessionConfiguration
 		config.InstructionDirectories = [];
 		config.PluginDirectories = [];
 
-		var parts = new List<string>
-		{
-			"You are running inside TurboPilot, a desktop client. "
-				+ "The user sees your output as markdown. Ask questions with the user-input tool; "
-				+ "its choices and the user's answers appear in the chat transcript.",
-		};
+		var parts = new List<string>();
 
 		if (options.ApplyInstructions)
 		{
@@ -83,6 +78,7 @@ internal static class SessionConfiguration
 			.Where(item => !item.Enabled && !config.McpServers.ContainsKey(item.Name))
 			.Select(item => item.Name).ToList();
 
+		parts.Add(ApplicationInstructions.Read(applicationInstructionsPath));
 		config.SystemMessage = new SystemMessageConfig
 		{
 			Mode = SystemMessageMode.Append,

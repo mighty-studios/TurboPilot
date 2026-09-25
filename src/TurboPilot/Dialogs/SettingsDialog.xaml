@@ -141,7 +141,7 @@
 
 				<CheckBox x:Name="checkApplyInstructions" Content="Apply Instructions"
 						Margin="0,8,0,0"
-						ToolTip="Load instruction files into the session context"/>
+						ToolTip="Load enabled customization instructions. TurboPilot's central presentation instructions always apply."/>
 				<CheckBox x:Name="checkPreloadSkills" Content="Preload Skills"
 						Margin="0,4,0,0"
 						ToolTip="Load enabled skills into the session context"/>

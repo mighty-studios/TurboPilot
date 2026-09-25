@@ -26,6 +26,10 @@ When the replaced session has a conversation, a confirmation offers to carry it 
 
 ## Customization and permissions
 
+TurboPilot appends its own presentation instructions after the enabled instructions and preloaded skills, without replacing the runtime's system instructions. The central, user-editable file is `%LOCALAPPDATA%\TurboPilot\instructions\turbopilot.instructions.md`, outside the workspace. It is created from bundled defaults if missing and never overwritten when it exists. Edit it to customize Markdown formatting, Mermaid diagrams, embedded images, file links, and URL links.
+
+The file is read on every new or resumed session, even when **Apply Instructions** is off (that toggle controls customization instructions only). Edits do not change an already running session or a live model switch. An empty file intentionally supplies no app guidance; deleting it restores the defaults on the next start. An unreadable file or malformed YAML header reports an error and prevents startup rather than silently dropping the instructions.
+
 **Session -> Customization** controls the enabled instructions, skills, agents, and MCP servers. **Apply Instructions** loads only enabled instruction bodies, retaining their file scopes. **Preload Skills** loads enabled skill bodies and registers their resource folders; turning it off also disables automatic skill loading. Custom agent modes load their prompts and tool restrictions.
 
 Customization changes apply when starting or resuming a session. Automatic discovery is suppressed so it cannot restore unchecked items. Permissions remain live and apply to the next request. **Autopilot approves every permission request**, so use it only with a trusted workspace and tools.

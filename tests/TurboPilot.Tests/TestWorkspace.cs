@@ -11,6 +11,7 @@ internal sealed class TestWorkspace : IDisposable
 	public string Root { get; } = Path.Combine(Path.GetTempPath(), "TurboPilot.Tests", Guid.NewGuid().ToString("N"));
 	public string Workspace => Path.Combine(Root, "workspace");
 	public string HistoryDirectory => Path.Combine(Root, "history");
+	public string ApplicationInstructionsPath => Path.Combine(Root, "instructions", ApplicationInstructions.FileName);
 	public SessionStore Store { get; }
 
 	public TestWorkspace()
@@ -57,7 +58,7 @@ internal sealed class TestWorkspace : IDisposable
 		WorkingDirectory = options.WorkspaceFolder,
 		BaseDirectory = Path.Combine(Root, "runtime"),
 		LogLevel = CopilotLogLevel.Error,
-	}));
+	}), ApplicationInstructionsPath);
 
 	public void Dispose()
 	{
