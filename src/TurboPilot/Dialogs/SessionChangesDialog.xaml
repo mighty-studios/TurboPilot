@@ -1,0 +1,28 @@
+<ctl:TurbolandFloatingDialog x:Class="TurboPilot.Dialogs.SessionChangesDialog"
+					xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+					xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+					xmlns:ctl="clr-namespace:TurbolandTheme.Wpf.Controls;assembly=TurbolandTheme.Wpf"
+					Title="Session Changes" MinWidth="640" MaxWidth="960">
+	<!-- Paths are as long as the repository makes them, so the list states
+	     its width and scrolls rather than growing the dialog past any sane
+	     size, the same way Past Sessions does. -->
+	<StackPanel Margin="10" Width="600">
+		<Label x:Name="labelSummary" Content="Files changed this session"/>
+		<ListBox x:Name="listChanges" Height="260" DisplayMemberPath="Label"
+				SelectionMode="Single" SelectionChanged="OnSelectionChanged"
+				MouseDoubleClick="OnView"
+				ScrollViewer.HorizontalScrollBarVisibility="Auto">
+			<ListBox.ItemContainerStyle>
+				<Style TargetType="ListBoxItem">
+					<Setter Property="ToolTip" Value="{Binding Label}"/>
+				</Style>
+			</ListBox.ItemContainerStyle>
+		</ListBox>
+		<StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
+			<Button x:Name="buttonRevert" Content="Undo" Click="OnRevert" Margin="0,0,12,0"/>
+			<Button x:Name="buttonCompare" Content="Compare" Click="OnCompare" Margin="0,0,12,0"/>
+			<Button x:Name="buttonView" Content="View Diff" Click="OnView" Margin="0,0,12,0"/>
+			<Button Content="Close" IsCancel="True" IsDefault="True" Click="OnClose"/>
+		</StackPanel>
+	</StackPanel>
+</ctl:TurbolandFloatingDialog>

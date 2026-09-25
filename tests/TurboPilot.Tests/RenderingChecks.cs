@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text.Json;
 using TurboPilot.Rendering;
+using TurboPilot.Tools;
 
 namespace TurboPilot.Tests;
 
@@ -137,5 +138,50 @@ internal static class RenderingChecks
 		Check.True(bare.Rendered.Contains("No detail was reported."),
 			"An empty disclosure says so rather than opening onto nothing.");
 		Console.WriteLine("PASS tool calls summarized, bounded, escaped, and shut by default");
+
+		CheckChangeCards();
+	}
+
+	/// <summary>
+	/// The Changes card and the diff it opens. What matters is that a
+	/// path can never be read as markup or as a link to somewhere else,
+	/// and that a very long list stays a summary.
+	/// </summary>
+	private static void CheckChangeCards()
+	{
+		var changes = new List<WorkspaceChange>
+		{
+			new("src/App.cs", "modified"),
+			new("src/New <x>.cs", "added"),
+			new("src/Old.cs", "deleted"),
+		};
+		var (text, rendered) = NoticeFormatter.Changes(changes);
+		Check.Equal("Changes (3)\r\n~ src/App.cs\r\n+ src/New <x>.cs\r\n- src/Old.cs", text,
+			"Keep a plain list of changed files in the Raw tab");
+		Check.True(rendered.Contains("kp-change-modified") && rendered.Contains("kp-change-added")
+			&& rendered.Contains("kp-change-deleted"), "Mark each file by what happened to it.");
+		Check.True(rendered.Contains("New &lt;x&gt;.cs"), "A path can never be read as markup.");
+		Check.True(rendered.Contains("kp-act:diff%7Csrc%2FApp.cs"),
+			"Clicking a path asks for its diff, with the path encoded into the link.");
+		Check.True(rendered.Contains("kp-act:revert%7Csrc%2FApp.cs") && rendered.Contains("kp-act:tool%7Csrc%2FApp.cs"),
+			"Offer the diff tool and the undo beside each file.");
+		Check.True(rendered.Contains("Review all 3 files"), "Offer the whole session from the card.");
+
+		var many = Enumerable.Range(0, 40).Select(index => new WorkspaceChange("f" + index + ".cs", "modified")).ToList();
+		var (manyText, manyRendered) = NoticeFormatter.Changes(many);
+		Check.Equal(10, manyRendered.Split("kp-change-row kp-change-").Length - 1, "A long list is capped rather than dumped");
+		Check.True(manyText.Contains("... 30 more") && manyRendered.Contains("Review all 40 files"),
+			"A capped list says how much it is not showing.");
+
+		var (diffText, diffRendered) = NoticeFormatter.Diff("src/App.cs",
+			"@@ -1 +1 @@\n-var x = <1>;\n+var x = 2;\n unchanged");
+		Check.True(diffText.StartsWith("--- src/App.cs ---", StringComparison.Ordinal), "Name the file in the Raw tab.");
+		Check.True(diffRendered.Contains("kp-diff-hunk") && diffRendered.Contains("kp-diff-del")
+			&& diffRendered.Contains("kp-diff-add") && diffRendered.Contains("kp-diff-ctx"),
+			"Color a diff a line at a time rather than making the reader count leading characters.");
+		Check.True(diffRendered.Contains("var x = &lt;1&gt;;"), "A diff can never be read as markup.");
+		Check.True(NoticeFormatter.Diff("src/App.cs", "").Text.Contains("No change to show"),
+			"An empty diff says so.");
+		Console.WriteLine("PASS change cards listing, capping, linking, and escaping");
 	}
 }

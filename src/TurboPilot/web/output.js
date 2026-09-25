@@ -97,6 +97,24 @@
 	// streaming updates working without rebinding handlers.
 
 	var KP_PATH_SCHEME = "kp-path:";
+	var KP_ACT_SCHEME = "kp-act:";
+
+	// Change-card actions. The href carries a verb and a path joined by
+	// a bar, so one scheme covers viewing a diff, opening the user's
+	// diff tool, reverting a file, and reviewing everything at once.
+	function actionFromAnchor(a) {
+		if (!a || !a.getAttribute) return null;
+		var href = a.getAttribute("href");
+		if (!href) return null;
+		var lower = href.toLowerCase();
+		var prefix = lower.indexOf(KP_ACT_SCHEME) === 0 ? KP_ACT_SCHEME.length
+			: lower.indexOf("kp-act%3a") === 0 ? "kp-act%3a".length
+				: -1;
+		if (prefix < 0) return null;
+		var payload = href.substring(prefix);
+		try { return decodeURIComponent(payload); }
+		catch (_) { return payload; }
+	}
 
 	function pathFromAnchor(a) {
 		if (!a) return null;
@@ -144,6 +162,15 @@
 
 	document.addEventListener("click", function (e) {
 		var a = e.target && e.target.closest && e.target.closest("a[href]");
+		var action = actionFromAnchor(a);
+		if (action === null) return;
+		e.preventDefault();
+		e.stopPropagation();
+		postPathMessage("action", action);
+	});
+
+	document.addEventListener("click", function (e) {
+		var a = e.target && e.target.closest && e.target.closest("a[href]");
 		if (!isPathAnchor(a)) return;
 		e.preventDefault();
 		e.stopPropagation();
@@ -159,7 +186,7 @@
 		var a = e.target && e.target.closest && e.target.closest("a[href]");
 		if (!a) return;
 		// kp-path links are already fully handled above
-		if (isPathAnchor(a)) return;
+		if (isPathAnchor(a) || actionFromAnchor(a) !== null) return;
 		e.preventDefault();
 		e.stopPropagation();
 	});

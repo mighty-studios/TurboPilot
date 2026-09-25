@@ -1,4 +1,5 @@
 using System.Text;
+using TurboPilot.Tools;
 
 namespace TurboPilot.Rendering;
 
@@ -119,6 +120,73 @@ internal static class NoticeFormatter
 		rendered.Append("</details></div>");
 		return (text.ToString(), rendered.ToString());
 	}
+
+	/// <summary>
+	/// What a turn did to the files on disk. Capped, because a card
+	/// listing two hundred files is a wall, not a summary; the rest are
+	/// reachable through the review link.
+	/// </summary>
+	public static (string Text, string Rendered) Changes(IReadOnlyList<WorkspaceChange> changes, int shown = 10)
+	{
+		var visible = changes.Count <= shown ? changes : changes.Take(shown).ToList();
+		var title = "Changes (" + changes.Count + ")";
+		var text = new StringBuilder(title);
+		var rendered = new StringBuilder("<div class=\"kp-card kp-changes\">")
+			.Append("<div class=\"kp-card-title\">").Append(title).Append("</div>")
+			.Append("<div class=\"kp-change-rows\">");
+		foreach (var change in visible)
+		{
+			text.Append("\r\n").Append(change.Mark).Append(' ').Append(change.Path);
+			var link = "kp-act:" + Uri.EscapeDataString("diff|" + change.Path);
+			rendered.Append("<div class=\"kp-change-row kp-change-").Append(change.Kind).Append("\">")
+				.Append("<span class=\"kp-change-mark\">").Append(Escape(change.Mark)).Append("</span>")
+				.Append("<a class=\"kp-change-path\" href=\"").Append(link).Append("\">")
+				.Append(Escape(change.Path)).Append("</a>")
+				.Append("<span class=\"kp-change-acts\">")
+				.Append(Action("tool", change.Path, "compare"))
+				.Append(Action("revert", change.Path, "undo"))
+				.Append("</span></div>");
+		}
+		rendered.Append("</div>");
+		if (changes.Count > visible.Count)
+			text.Append("\r\n... ").Append(changes.Count - visible.Count).Append(" more");
+		rendered.Append("<div class=\"kp-change-more\"><a href=\"kp-act:all\">Review all ")
+			.Append(changes.Count).Append(" files</a></div></div>");
+		return (text.ToString(), rendered.ToString());
+	}
+
+	/// <summary>
+	/// One file's change as a unified diff, colored a line at a time so
+	/// an addition and a removal do not have to be told apart by
+	/// counting leading characters.
+	/// </summary>
+	public static (string Text, string Rendered) Diff(string path, string diff)
+	{
+		if (string.IsNullOrWhiteSpace(diff))
+			return Status("diff", "No change to show for " + path + ".");
+
+		var rendered = new StringBuilder("<div class=\"kp-card kp-diffcard\">")
+			.Append("<div class=\"kp-card-title\">").Append(Escape(path)).Append("</div>")
+			.Append("<pre class=\"kp-diff\">");
+		foreach (var line in diff.Replace("\r\n", "\n").Split('\n'))
+		{
+			var kind = line.StartsWith("+++", StringComparison.Ordinal) || line.StartsWith("---", StringComparison.Ordinal)
+				|| line.StartsWith("diff ", StringComparison.Ordinal) || line.StartsWith("index ", StringComparison.Ordinal)
+					? "meta"
+				: line.StartsWith('@') ? "hunk"
+				: line.StartsWith('+') ? "add"
+				: line.StartsWith('-') ? "del"
+				: "ctx";
+			rendered.Append("<span class=\"kp-diff-").Append(kind).Append("\">")
+				.Append(Escape(line)).Append("</span>\n");
+		}
+		rendered.Append("</pre></div>");
+		return ("--- " + path + " ---\r\n" + diff, rendered.ToString());
+	}
+
+	private static string Action(string verb, string path, string label) =>
+		"<a class=\"kp-change-act\" href=\"kp-act:" + Uri.EscapeDataString(verb + "|" + path) + "\">["
+		+ Escape(label) + "]</a>";
 
 	/// <summary>
 	/// A block of already-aligned text under a heading, for listings the

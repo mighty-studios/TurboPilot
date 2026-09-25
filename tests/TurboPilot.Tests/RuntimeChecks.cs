@@ -195,6 +195,21 @@ internal static class RuntimeChecks
 					"A denied tool card must be marked as failed.");
 				Check.True(!resumed.RenderedTranscript.Contains("<details open"),
 					"Tool detail must stay shut until the reader asks for it.");
+
+				// What the turn did to the files is taken from the disk,
+				// not from what the agent said it did.
+				provider.Replies.Enqueue(new LocalProvider.Reply("", ToolName: "powershell",
+					ToolArguments: """{"command":"Set-Content -Path changed.txt -Value TurboPilotChangeProbe","description":"Write a fixture file"}"""));
+				provider.Replies.Enqueue(new LocalProvider.Reply("File written."));
+				await SendAndWaitAsync(resumed, "write a file into the workspace");
+				await Check.UntilAsync(() => resumed.Transcript.Contains("changed.txt"),
+					"The turn did not report the file it created.");
+				Check.True(resumed.Transcript.Contains("Changes (") && resumed.Transcript.Contains("+ changed.txt"),
+					"A turn that changed the workspace must say so: " + resumed.Transcript);
+				Check.True(resumed.RenderedTranscript.Contains("kp-change-added")
+					&& resumed.RenderedTranscript.Contains("kp-act:diff"),
+					"Each changed file must be clickable.");
+				Console.WriteLine("PASS per-turn workspace change reporting");
 			}
 			finally
 			{

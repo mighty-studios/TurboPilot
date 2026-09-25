@@ -394,6 +394,10 @@ public partial class MainWindow : TurbolandWindow
 				}
 				break;
 
+			case "action":
+				HandleChangeAction(path);
+				break;
+
 			case "revealPath":
 				// Reveal file in Explorer
 				try
@@ -1394,6 +1398,93 @@ public partial class MainWindow : TurbolandWindow
 		}
 	}
 
+
+	// -- Workspace changes -----------------------------------------------------
+
+	/// <summary>
+	/// Acts on a click in the Changes card. The payload is a verb and a
+	/// path joined by a bar, so one link scheme covers showing a diff,
+	/// handing the file to the user's own diff tool, putting it back,
+	/// and reviewing the whole session at once.
+	/// </summary>
+	private void HandleChangeAction(string payload)
+	{
+		var chat = _chat;
+		if (chat is null) return;
+		var split = payload.IndexOf('|');
+		var verb = split < 0 ? payload : payload[..split];
+		var path = split < 0 ? string.Empty : payload[(split + 1)..];
+		var anchor = chat.TurnAnchor ?? chat.SessionAnchor;
+
+		switch (verb)
+		{
+			case "all":
+				ShowSessionChanges();
+				break;
+			case "diff":
+				ShowFileDiff(chat, anchor, path);
+				break;
+			case "tool":
+				if (!WorkspaceChanges.OpenDiffTool(anchor, path))
+					chat.AddNotice(NoticeFormatter.Status("diff", "No diff tool is configured for this workspace."));
+				break;
+			case "revert":
+				RevertFile(chat, anchor, path);
+				break;
+		}
+	}
+
+	/// <summary>
+	/// Shows one file's change in the transcript, or opens the file
+	/// when there is nothing to diff it against.
+	/// </summary>
+	private void ShowFileDiff(ChatService chat, ChangeAnchor? anchor, string path)
+	{
+		if (anchor is null) return;
+		if (!anchor.HasDiffs)
+		{
+			HandleWebMessage("openPath", WorkspaceChanges.FullPath(anchor, path));
+			return;
+		}
+		chat.ShowDiff(path, WorkspaceChanges.Diff(anchor, path));
+	}
+
+	/// <summary>
+	/// Puts one file back as it was. Discarding work is the one action
+	/// in the card that cannot be undone, so it asks first and names
+	/// the file it is about to overwrite.
+	/// </summary>
+	private void RevertFile(ChatService chat, ChangeAnchor? anchor, string path)
+	{
+		if (anchor is null || !anchor.HasDiffs)
+		{
+			chat.AddNotice(NoticeFormatter.Status("revert",
+				"Reverting needs a Git workspace, so this file cannot be put back."));
+			return;
+		}
+		if (MessageBox.Show(this, "Discard the changes to this file and put it back as it was?\r\n\r\n" + path,
+			"Undo Change", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+			return;
+
+		chat.AddNotice(WorkspaceChanges.Revert(anchor, path)
+			? NoticeFormatter.Status("revert", "Put back " + path + ".")
+			: NoticeFormatter.Status("revert", "Could not put back " + path + "."));
+	}
+
+	/// <summary>
+	/// Everything the session has changed so far, in one list. The
+	/// per-turn cards answer "what did that do"; this answers "what
+	/// have we done", which is the question asked before committing.
+	/// </summary>
+	private void ShowSessionChanges()
+	{
+		var chat = _chat;
+		if (chat?.SessionAnchor is not { } anchor) return;
+		var dialog = new SessionChangesDialog(anchor) { Owner = this };
+		dialog.ShowDialog();
+		if (dialog.Diffed is { } diffed)
+			ShowFileDiff(chat, anchor, diffed);
+	}
 
 	// ── Session context ──────────────────────────────────────────────────────
 

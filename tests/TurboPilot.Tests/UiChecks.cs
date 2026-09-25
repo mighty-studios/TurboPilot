@@ -222,6 +222,7 @@ internal static class UiChecks
 			CheckTools(application, window, workspace);
 			CheckSettingsCaptions(workspace);
 			await CheckCommandsAsync(window);
+			CheckChangeActions(application, window);
 
 			var reply = new LocalProvider.Reply("**UI streaming reply**\n\n```mermaid\ngraph TD\nA[Input] --> B[Output]\n```");
 			provider.Replies.Enqueue(reply);
@@ -531,6 +532,33 @@ internal static class UiChecks
 
 		input.Document.Blocks.Clear();
 		Console.WriteLine("PASS typed commands: completion list, keys, and local answer without a turn");
+	}
+
+	/// <summary>
+	/// The Changes card acting on a click. The link scheme carries a
+	/// verb and a path, and the risk worth checking is that a verb
+	/// nobody implemented, or a path that is not there, does nothing at
+	/// all rather than something unexpected.
+	/// </summary>
+	private static void CheckChangeActions(Application application, MainWindow window)
+	{
+		var chat = Field<ChatService>(window, "_chat");
+		var windows = application.Windows.Count;
+
+		var before = chat.Transcript.Length;
+		Invoke(window, "HandleChangeAction", "nonesuch|a.txt");
+		Invoke(window, "HandleChangeAction", "");
+		Check.Equal(before, chat.Transcript.Length, "An unknown action must do nothing at all");
+		Check.Equal(windows, application.Windows.Count, "An unknown action must not open a window");
+
+		// The runtime workspace is not a repository, so there is no
+		// earlier copy to compare against or restore from, and both
+		// actions have to say so rather than pretend.
+		Invoke(window, "HandleChangeAction", "revert|a.txt");
+		Check.True(chat.Transcript.Contains("Reverting needs a Git workspace"),
+			"Reverting without an earlier copy must explain itself: " + chat.Transcript);
+		Check.Equal(windows, application.Windows.Count, "Refusing to revert must not open a window");
+		Console.WriteLine("PASS change card actions refusing what they cannot do");
 	}
 
 	private static void CheckSettingsCaptions(TestWorkspace workspace)	{

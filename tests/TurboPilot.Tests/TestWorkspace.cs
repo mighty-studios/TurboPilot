@@ -63,6 +63,17 @@ internal sealed class TestWorkspace : IDisposable
 
 	public void Dispose()
 	{
+		// Git marks the objects it writes read-only, so a fixture that
+		// created a repository cannot be swept away without clearing
+		// the attribute first.
+		try
+		{
+			foreach (var file in Directory.EnumerateFiles(Root, "*", SearchOption.AllDirectories))
+				File.SetAttributes(file, FileAttributes.Normal);
+		}
+		catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+		{
+		}
 		Directory.Delete(Root, recursive: true);
 	}
 }

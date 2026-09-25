@@ -14,6 +14,30 @@ The **Raw** tab preserves streamed conversation text. **Rendered** supports mark
 
 The status line shows `Starting..`, `Ready..`, `Working..`, or `Waiting..`, followed by context usage in whole Ki tokens. Cloud sessions also display whole AI Credits as `AiC=<value>`. Long model IDs and session IDs are shortened to keep the status line and the Past Sessions list at a readable width; hover either to see the full value.
 
+## Seeing what changed on disk
+
+At the end of every turn that touched the workspace, a card lists what changed:
+
+```
+Changes (3)
+~ src/TurboPilot/MainWindow.xaml.cs   [compare] [undo]
++ src/TurboPilot/Tools/Sounds.cs      [compare] [undo]
+- src/TurboPilot/Old.cs               [compare] [undo]
+```
+
+- Click the **path** to read the diff inline, in the transcript, beside the turn that made it.
+- Click **[compare]** to hand the file to whatever `git difftool` is configured to open.
+- Click **[undo]** to put the file back as it was before the turn. It asks first.
+- Click **Review all** for every file the session has changed so far, in one dialog.
+
+The list is taken from the workspace, not from what the agent said it did: a tool can write a file nobody was told about, and a reported edit can fail.
+
+In a Git workspace the comparison point is a commit object made with `git stash create`, which records the working tree without touching it or the index. That means a file you had already modified before the turn is not blamed on the turn, and its later edit is still reported. Nothing is committed, staged, or stashed on your behalf.
+
+Outside a Git workspace there is nothing to compare against, so the card lists which files changed and clicking one opens it. Compare and undo are not offered, because there is no earlier copy to offer them from.
+
+A turn that changed nothing writes no card.
+
 ## Seeing what the agent did
 
 Every tool the agent runs leaves a card in the transcript. The headline is the one line worth seeing at a glance: the shell command, the file being read, the pattern being searched. Click it to open the full arguments and whatever the tool reported back.

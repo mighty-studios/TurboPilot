@@ -23,6 +23,7 @@ internal static class CoreChecks
 		CheckWorkspaceReadme();
 		CheckShortText();
 		CheckSlashCommands();
+		CheckWorkspaceChanges();
 		CheckSessionSnapshot();
 		CheckStorage();
 		await CheckQuestionsAsync();
@@ -32,8 +33,103 @@ internal static class CoreChecks
 	}
 
 	/// <summary>
-	/// Typed commands. The risk worth checking is not that a command
-	/// fails to run, but that an ordinary message is mistaken for one
+	/// What a turn changed on disk, against a real repository. The list
+	/// has to come from the workspace rather than from what the agent
+	/// said it did, and it has to be right about a file that was
+	/// already modified before the turn began.
+	/// </summary>
+	private static void CheckWorkspaceChanges()
+	{
+		using var workspace = new TestWorkspace();
+		var root = workspace.Workspace;
+		if (Git(root, "init -q -b main") is null)
+		{
+			Console.WriteLine("SKIP workspace changes: git is not available");
+			return;
+		}
+		Git(root, "config user.email fixture@example.invalid");
+		Git(root, "config user.name Fixture");
+		workspace.Write("workspace\\kept.txt", "one\n");
+		workspace.Write("workspace\\edited.txt", "before\n");
+		workspace.Write("workspace\\removed.txt", "gone soon\n");
+		Git(root, "add -A");
+		Git(root, "commit -q -m fixture");
+
+		// A file dirtied before the turn must not be reported by it,
+		// and its later edit must be reported against that dirty state.
+		File.WriteAllText(Path.Combine(root, "kept.txt"), "one\ntwo\n");
+		var anchor = WorkspaceChanges.Begin(root);
+		Check.True(anchor is { HasDiffs: true }, "A repository workspace must anchor against a commit.");
+
+		File.WriteAllText(Path.Combine(root, "edited.txt"), "after\n");
+		File.WriteAllText(Path.Combine(root, "created.txt"), "new\n");
+		File.Delete(Path.Combine(root, "removed.txt"));
+
+		var changes = WorkspaceChanges.Since(anchor);
+		var byPath = changes.ToDictionary(change => change.Path, change => change.Kind);
+		Check.True(!byPath.ContainsKey("kept.txt"),
+			"A file already modified before the turn is not the turn's doing: " + string.Join(", ", byPath.Keys));
+		Check.Equal("modified", byPath.GetValueOrDefault("edited.txt"), "Report an edited file");
+		Check.Equal("added", byPath.GetValueOrDefault("created.txt"), "Report a created file");
+		Check.Equal("deleted", byPath.GetValueOrDefault("removed.txt"), "Report a deleted file");
+
+		var diff = WorkspaceChanges.Diff(anchor, "edited.txt");
+		Check.True(diff.Contains("-before") && diff.Contains("+after"),
+			"A diff must show what the change actually was: " + diff);
+
+		Check.True(WorkspaceChanges.Revert(anchor, "edited.txt"), "Reverting a tracked file must succeed.");
+		Check.Equal("before\n", File.ReadAllText(Path.Combine(root, "edited.txt")).Replace("\r\n", "\n"),
+			"Reverting puts the file back as it was when the turn began");
+		Check.Equal(0, WorkspaceChanges.Since(anchor).Count(change => change.Path == "edited.txt"),
+			"A reverted file is no longer a change");
+
+		// Outside a repository there is nothing to diff against, but
+		// the list of files is still worth having.
+		using var plain = new TestWorkspace();
+		plain.Write("workspace\\a.txt", "a");
+		var loose = WorkspaceChanges.Begin(plain.Workspace);
+		Check.True(loose is { HasDiffs: false }, "A workspace without Git anchors on file stamps instead.");
+		File.WriteAllText(Path.Combine(plain.Workspace, "b.txt"), "b");
+		Check.True(WorkspaceChanges.Since(loose).Any(change => change.Path == "b.txt" && change.Kind == "added"),
+			"A workspace without Git still reports which files changed.");
+		Check.Equal(string.Empty, WorkspaceChanges.Diff(loose, "b.txt"),
+			"A workspace without Git offers no diff rather than a wrong one");
+		Check.True(!WorkspaceChanges.Revert(loose, "b.txt"), "Nothing can be put back without an earlier copy.");
+
+		Check.Equal(0, WorkspaceChanges.Since(null).Count, "No anchor means nothing to report");
+		Check.True(WorkspaceChanges.Begin(Path.Combine(workspace.Root, "absent")) is null,
+			"A workspace that is not there cannot be watched.");
+		Console.WriteLine("PASS workspace changes anchored per turn, diffed, and reverted");
+
+		static string? Git(string workspace, string arguments)
+		{
+			try
+			{
+				using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+				{
+					FileName = "git",
+					Arguments = arguments,
+					WorkingDirectory = workspace,
+					RedirectStandardOutput = true,
+					RedirectStandardError = true,
+					UseShellExecute = false,
+					CreateNoWindow = true,
+				});
+				if (process is null) return null;
+				var output = process.StandardOutput.ReadToEnd();
+				process.StandardError.ReadToEnd();
+				process.WaitForExit(20_000);
+				return output;
+			}
+			catch (Exception)
+			{
+				return null;
+			}
+		}
+	}
+
+	/// <summary>
+	/// Typed commands. The risk worth checking is not that a command	/// fails to run, but that an ordinary message is mistaken for one
 	/// and never reaches the model.
 	/// </summary>
 	private static void CheckSlashCommands()

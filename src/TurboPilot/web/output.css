@@ -273,6 +273,47 @@ input[type="radio"] {
 	margin-top: 4px;
 }
 
+/* What a turn changed on disk: one row per file, its state in the mark
+   a diff uses, with the actions kept to the right of the path. */
+.kp-change-rows {
+	margin: 4px 0 2px 0;
+}
+.kp-change-row {
+	display: flex;
+	gap: 8px;
+	padding: 1px 0;
+}
+.kp-change-mark {
+	flex: none;
+	white-space: pre;
+}
+.kp-change-path {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.kp-change-acts {
+	flex: none;
+	margin-left: auto;
+	white-space: nowrap;
+}
+.kp-change-act {
+	margin-left: 8px;
+}
+.kp-change-more {
+	margin-top: 4px;
+}
+.kp-diff {
+	margin: 4px 0 0 0;
+	padding: 0;
+	white-space: pre;
+	overflow-x: auto;
+	font: inherit;
+}
+.kp-diff span {
+	display: block;
+}
+
 /* A tool call: a headline always visible, the arguments and the output
    behind a disclosure that is shut until the reader asks. */
 .kp-tool > details > summary {

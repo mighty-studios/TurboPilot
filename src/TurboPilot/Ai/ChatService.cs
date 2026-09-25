@@ -54,6 +54,12 @@ public sealed class ChatService : IAsyncDisposable
 	// second entry the reader has to pair up by eye.
 	private sealed record ToolRecord(string Name, string Headline, string Body);
 	private readonly Dictionary<string, ToolRecord> _toolCalls = [];
+
+	// Where the workspace stood when the turn began, and when the
+	// session began, so a turn can report what it changed and the whole
+	// session can be reviewed at once.
+	private ChangeAnchor? _turnAnchor;
+	private ChangeAnchor? _sessionAnchor;
 	private const int HandoffRecentRequests = 4;
 	private const int HandoffRequestChars = 2000;
 
@@ -280,6 +286,11 @@ public sealed class ChatService : IAsyncDisposable
 				AddNotice(NoticeFormatter.Status("attached", string.Join(", ", attachmentPaths.Select(Path.GetFileName))));
 
 			var wasWorking = _isWorking;
+			// Taken before the request goes out, so the card at the end
+			// of the turn reports what this turn did and not what was
+			// already sitting in the working tree.
+			_turnAnchor = await Task.Run(() => WorkspaceChanges.Begin(_options.WorkspaceFolder), linked.Token);
+			_sessionAnchor ??= _turnAnchor;
 			lock (_sync)
 			{
 				_acceptQuestions = true;
@@ -721,6 +732,7 @@ public sealed class ChatService : IAsyncDisposable
 						_streamedMessages.Clear();
 						_completedMessages.Clear();
 						_messageBuffers.Clear();
+						ReportChanges();
 						if (_pendingChanges is not null)
 							_ = Task.Run(ApplyPendingChangesAsync);
 						ReleaseQuestions();
@@ -744,7 +756,7 @@ public sealed class ChatService : IAsyncDisposable
 		EmitTranscript("\r\n" + text + "\r\n\r\n", null,
 			rendered is null ? null : "\r\n\r\n" + rendered + "\r\n\r\n");
 
-	private void AddNotice((string Text, string Rendered) notice) => AddNotice(notice.Text, notice.Rendered);
+	internal void AddNotice((string Text, string Rendered) notice) => AddNotice(notice.Text, notice.Rendered);
 
 	/// <summary>
 	/// Rereads the agent's plan and shows it two ways: a position in the
@@ -896,9 +908,50 @@ public sealed class ChatService : IAsyncDisposable
 			AddNotice("[tool] " + started.Name + " failed: " + ShortText.Clip(outcome, 200));
 	}
 
+	/// <summary>Where the workspace stood when this turn began.</summary>
+	internal ChangeAnchor? TurnAnchor => _turnAnchor;
+
+	/// <summary>Where the workspace stood when the session began.</summary>
+	internal ChangeAnchor? SessionAnchor => _sessionAnchor;
+
 	/// <summary>
-	/// Looks up the latest Copilot CLI release off the event thread and
-	/// writes one line if the running CLI is behind. BYOK sessions never
+	/// Closes the turn with an account of what it did to the files on
+	/// disk. The list comes from the workspace, not from the tools the
+	/// agent said it ran: a tool can write a file nobody was told about,
+	/// and a reported edit can fail.
+	///
+	/// A turn that changed nothing writes nothing. Most turns are
+	/// questions, and a card saying "Changes (0)" after every one of
+	/// them would train the user to ignore the card that matters.
+	/// </summary>
+	private void ReportChanges()
+	{
+		if (_turnAnchor is not { } anchor) return;
+		_turnAnchor = null;
+		_ = Task.Run(() =>
+		{
+			try
+			{
+				var changes = WorkspaceChanges.Since(anchor);
+				if (changes.Count > 0)
+					AddNotice(NoticeFormatter.Changes(changes));
+			}
+			catch (Exception)
+			{
+				// Nothing about reviewing changes is worth interrupting
+				// a session over.
+			}
+		});
+	}
+
+	/// <summary>
+	/// Prints one file's change at the foot of the transcript, where it
+	/// sits beside the turn that made it.
+	/// </summary>
+	internal void ShowDiff(string path, string diff) => AddNotice(NoticeFormatter.Diff(path, diff));
+
+	/// <summary>
+	/// Looks up the latest Copilot CLI release off the event thread and	/// writes one line if the running CLI is behind. BYOK sessions never
 	/// reach here: they do not use the CLI, so its version is not their
 	/// problem. Failures are silent by design.
 	/// </summary>
