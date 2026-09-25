@@ -24,7 +24,12 @@
 				SelectionMode="Extended" SelectionChanged="OnSelectionChanged"
 				ScrollViewer.HorizontalScrollBarVisibility="Auto">
 			<ListBox.ItemContainerStyle>
-				<Style TargetType="ListBoxItem">
+				<!-- BasedOn is required, not tidiness: a bare
+				     TargetType="ListBoxItem" style replaces the theme's
+				     implicit one outright, and the rows fall back to
+				     stock WPF chrome whose selection is nearly the same
+				     color as the field behind it. -->
+				<Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
 					<Setter Property="ToolTip" Value="{Binding DisplayLabel}"/>
 				</Style>
 			</ListBox.ItemContainerStyle>

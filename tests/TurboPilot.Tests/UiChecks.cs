@@ -661,7 +661,87 @@ internal static class UiChecks
 	}
 
 	/// <summary>
-	/// Deleting is the one thing in the dialog that cannot be taken back,
+	/// The changes list declares the same kind of row style as Past
+	/// Sessions, so it can lose the theme the same way. Driven through
+	/// the git seam rather than a real repository, since the rows only
+	/// have to exist to be looked at.
+	/// </summary>
+	private static void CheckChangesRowSelectionIsVisible(MainWindow window)
+	{
+		var previous = WorkspaceChanges.Runner;
+		WorkspaceChanges.Runner = (_, arguments) => arguments.StartsWith("diff --name-status")
+			? "M\tsrc\\one.cs\nA\tsrc\\two.cs\n"
+			: "";
+		var dialog = new SessionChangesDialog(new ChangeAnchor(@"D:\dev\p", "HEAD", new HashSet<string>(), null))
+		{
+			Owner = window,
+		};
+		try
+		{
+			TurbolandTheme.Wpf.TurbolandTheme.ApplyTo(dialog);
+			dialog.Show();
+			CheckRowSelectionIsVisible(Control<ListBox>(dialog, "listChanges"), "The session changes list");
+		}
+		finally
+		{
+			dialog.Close();
+			WorkspaceChanges.Runner = previous;
+		}
+	}
+
+	/// <summary>
+	/// A row has to look picked. An <c>ItemContainerStyle</c> declared
+	/// without <c>BasedOn</c> replaces the theme's implicit style rather
+	/// than extending it, which drops the row template and leaves stock
+	/// WPF chrome: a selection bar nearly the color of the cyan field
+	/// behind it, and a border that only appears once the window is
+	/// deactivated. Nothing about that is visible in the markup, so it
+	/// is asserted against the rendered row instead.
+	/// </summary>
+	private static void CheckRowSelectionIsVisible(ListBox list, string where)
+	{
+		list.UpdateLayout();
+		Check.True(list.Items.Count >= 2, $"{where} needs two rows to compare");
+		var selected = Row(0);
+		var plain = Row(1);
+		// Single-select lists refuse the collection, so the selection is
+		// set the way each mode allows.
+		if (list.SelectionMode == SelectionMode.Single)
+			list.SelectedItem = list.Items[0];
+		else
+		{
+			list.SelectedItems.Clear();
+			list.SelectedItems.Add(list.Items[0]);
+		}
+		list.UpdateLayout();
+
+		// The theme's row parts are the evidence that the theme's style
+		// survived: a stock row has neither.
+		var bar = selected.Template.FindName("border", selected) as Border;
+		Check.True(bar is not null && selected.Template.FindName("focus", selected) is Border,
+			$"{where} rows must keep the themed template; a style without BasedOn discards it.");
+
+		var fill = Opaque(bar!.Background) ?? Opaque(list.Background)!;
+		var behind = Opaque((Row(1).Template.FindName("border", plain) as Border)?.Background) ?? Opaque(list.Background)!;
+		Check.True(fill != behind,
+			$"{where} must not paint a picked row the same as the field behind it: {fill} against {behind}.");
+		Check.True(Opaque(selected.Foreground) != Opaque(plain.Foreground),
+			$"{where} must not write a picked row in the same ink as the rest: {selected.Foreground}.");
+
+		ListBoxItem Row(int index)
+		{
+			var row = (ListBoxItem)list.ItemContainerGenerator.ContainerFromIndex(index)!;
+			row.ApplyTemplate();
+			return row;
+		}
+
+		// A transparent fill is the row deferring to the list behind it,
+		// which is a color the comparison still has to account for.
+		static System.Windows.Media.Color? Opaque(System.Windows.Media.Brush? brush) =>
+			brush is System.Windows.Media.SolidColorBrush { Color.A: > 0 } solid ? solid.Color : null;
+	}
+
+	/// <summary>
 	/// so what it acts on has to be exactly what was picked. A run of
 	/// rows can be picked at once, the running session is never among
 	/// them, and only what was removed from disk leaves the list.
@@ -689,6 +769,8 @@ internal static class UiChecks
 			dialog.UpdateLayout();
 
 			var list = Control<ListBox>(dialog, "listSessions");
+			CheckRowSelectionIsVisible(list, "The Past Sessions list");
+			CheckChangesRowSelectionIsVisible(window);
 			Check.True(list.SelectionMode != SelectionMode.Single,
 				"The list must take more than one row, or a run of old sessions cannot be cleared in one pass.");
 
