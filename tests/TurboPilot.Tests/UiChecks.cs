@@ -11,6 +11,7 @@ using Microsoft.Web.WebView2.Wpf;
 using TurboPilot.Ai;
 using TurboPilot.Customizations;
 using TurboPilot.Dialogs;
+using TurboPilot.Rendering;
 using TurboPilot.Tools;
 
 namespace TurboPilot.Tests;
@@ -257,6 +258,7 @@ internal static class UiChecks
 					await Task.Delay(100);
 			}
 			Check.True(rendered, "The Rendered tab must render streamed markdown and a Mermaid diagram.");
+			await CheckTranscriptSaveAsync(window);
 			SetInput(window, "unsent draft");
 			Click(window, "buttonHistoryPrev");
 			Check.Equal("UI prompt marker", Input(window), "Recall a sent prompt with the up arrow");
@@ -608,6 +610,32 @@ internal static class UiChecks
 			combo.SelectedIndex = 0;
 			return dialog;
 		}
+	}
+
+	/// <summary>
+	/// The Session menu's Save Transcript, taken through the live renderer
+	/// rather than the formatter alone, so the saved page is the document
+	/// that is actually on screen.
+	/// </summary>
+	private static async Task CheckTranscriptSaveAsync(MainWindow window)
+	{
+		var chat = Field<ChatService>(window, "_chat");
+		var page = await (Task<string?>)Invoke(window, "BuildTranscriptFileAsync", TranscriptExport.Format.Html, chat)!;
+		Check.True(page is not null, "The renderer is up, so a page must be produced");
+		Check.True(page!.Contains("<strong>UI streaming reply</strong>"),
+			"The saved page must carry the rendered document, not the markdown it came from");
+		Check.True(page.Contains("<svg"), "A diagram is already drawn on screen and must be saved drawn");
+		Check.True(page.Contains("data:font/ttf;base64,"), "The saved page must carry the face it is read in");
+		Check.True(!page.Contains("<script"), "A saved transcript must not carry script");
+
+		var markdown = await (Task<string?>)Invoke(window, "BuildTranscriptFileAsync", TranscriptExport.Format.Markdown, chat)!;
+		Check.True(markdown!.Contains("**UI streaming reply**"), "Markdown must be saved as markdown");
+
+		var text = await (Task<string?>)Invoke(window, "BuildTranscriptFileAsync", TranscriptExport.Format.Text, chat)!;
+		Check.True(text!.Contains("UI streaming reply") && !text.Contains("<strong>"),
+			"The text form is the Raw tab, without markup");
+
+		Console.WriteLine("PASS saved transcript carrying the rendered document, diagram, and face");
 	}
 
 	/// <summary>

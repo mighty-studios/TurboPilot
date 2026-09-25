@@ -137,8 +137,9 @@ Customization changes apply when starting or resuming a session. Automatic disco
 Selecting an item in the Customization tabs fills **Item Details**. **Add To Prompt** names that item for the next request: skills, agents, and MCP servers by the name the runtime knows them by, everything else by the file path the model can read. The picks are dropped into the prompt box when the settings dialog closes, under whatever is already typed, and left there to edit. Nothing is sent on your behalf, the same pick twice still counts once, and Cancel in Customization discards the picks along with the rest of the dialog.
 
 ## Saved sessions
-
 **Session -> Past Sessions** searches saved sessions by ID, workspace, or prompt. **View** opens a transcript without connecting. **Resume** restores the original conversation, workspace, model settings, usage, and prompt history.
+
+**Session -> Save Transcript...** writes the transcript to a file. The extension you pick decides the form: `.html` saves the Rendered tab as it stands, `.md` saves the Markdown it was built from, and anything else saves the Raw tab as plain text. The web page is standalone, with its styling and its font inlined and no script in it, so diagrams stay drawn, code stays colored, and the tool and change cards still open and shut in any browser. Saving a page needs the Rendered tab to be working; the text forms always do.
 
 A session records the customization selections and permissions it ran under, so resuming returns to the setup you had rather than whatever is configured now. Restored permissions are noted in the transcript. Sessions saved before this was recorded fall back to the current selections. Exiting preserves a session's history.
 

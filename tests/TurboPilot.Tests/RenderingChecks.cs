@@ -140,6 +140,41 @@ internal static class RenderingChecks
 		Console.WriteLine("PASS tool calls summarized, bounded, escaped, and shut by default");
 
 		CheckChangeCards();
+		CheckTranscriptExport();
+	}
+
+	/// <summary>
+	/// The saved transcript. What matters is that the page carries its own
+	/// styling and body, that the title cannot inject markup, and that the
+	/// chosen extension picks the form.
+	/// </summary>
+	private static void CheckTranscriptExport()
+	{
+		Check.Equal(TranscriptExport.Format.Html, TranscriptExport.FormatOf(@"C:\a\b.HTML"), "An html file is a page");
+		Check.Equal(TranscriptExport.Format.Markdown, TranscriptExport.FormatOf("b.md"), "An md file is markdown");
+		Check.Equal(TranscriptExport.Format.Text, TranscriptExport.FormatOf("b.log"), "Anything else is saved as text");
+
+		var name = TranscriptExport.SuggestedName("a b:c", new DateTime(2026, 2, 3, 4, 5, 6), TranscriptExport.Format.Html);
+		Check.Equal("a-b-c-20260203-040506.html", name, "A name must be datable and safe to write");
+		Check.True(TranscriptExport.SuggestedName("::", DateTime.Now, TranscriptExport.Format.Markdown).StartsWith("transcript-"),
+			"A label with nothing usable in it still yields a name");
+
+		var page = TranscriptExport.Html("<script>x</script>", ".kp{}", "@font-face{src:url('"
+			+ BorlandVisionTheme.FontFileUrl + "');}", "<p>body text</p>", "data:font/ttf;base64,AA");
+		Check.True(page.Contains("&lt;script&gt;"), "A title must not be able to introduce markup");
+		Check.True(page.Contains(".kp{}") && page.Contains("<p>body text</p>"),
+			"The page must carry both its styling and its body");
+		Check.True(page.Contains("url('data:font/ttf;base64,AA')") && !page.Contains(BorlandVisionTheme.FontFileUrl),
+			"The font must be inlined, since its path only resolves in the application folder");
+		Check.True(!TranscriptExport.Html("t", "", "@font-face{src:url('" + BorlandVisionTheme.FontFileUrl + "');}", "", null)
+			.Contains("data:font"), "A font that cannot be read is left named, not faked");
+
+		Check.Equal("# T\n\nline\n", TranscriptExport.Plain("T", "line\r\n\r\n", TranscriptExport.Format.Markdown),
+			"Markdown gets a heading and one trailing newline");
+		Check.Equal("T\n\nline\n", TranscriptExport.Plain("T", "line", TranscriptExport.Format.Text),
+			"Text says what it is without markup");
+
+		Console.WriteLine("PASS transcript export naming, formats, and standalone page");
 	}
 
 	/// <summary>

@@ -69,6 +69,11 @@
                 <MenuItem x:Name="menuNewSession" Header="_Begin Session..." Click="OnNewSession"/>
                 <MenuItem x:Name="menuPastSessions" Header="_Past Sessions..." Click="OnPastSessions"/>
                 <Separator/>
+                <!-- Saves what is on screen, not a re-render: the HTML is
+                     the live Rendered document with its styling inlined, so
+                     a saved page reads the same as the tab it came from. -->
+                <MenuItem x:Name="menuSaveTranscript" Header="Sa_ve Transcript..." Click="OnSaveTranscript"/>
+                <Separator/>
                 <MenuItem x:Name="menuCompactContext" Header="_Compact Context" Click="OnCompactContext"/>
                 <MenuItem x:Name="menuResetContext" Header="_Reset Context" Click="OnResetContext"/>
                 <Separator/>

@@ -1622,6 +1622,85 @@ public partial class MainWindow : TurbolandWindow
 		noticeTextBlock.Visibility = Visibility.Visible;
 	}
 
+	// -- Saving a transcript ---------------------------------------------------
+
+	/// <summary>
+	/// Session menu: writes the transcript to a file the user picks. The
+	/// chosen extension decides the form, so one entry covers a page to
+	/// keep, markdown to paste and plain text to search.
+	/// </summary>
+	private async void OnSaveTranscript(object sender, RoutedEventArgs e) => await SaveTranscriptAsync();
+
+	private async Task SaveTranscriptAsync()
+	{
+		var transcript = _chat;
+		if (transcript is null || transcript.Transcript.Trim().Length == 0)
+		{
+			MessageDialog.Ok(this, "There is nothing in the transcript to save yet.", "Save Transcript");
+			return;
+		}
+
+		var label = _sessionId is null ? "transcript" : ShortText.SessionId(_sessionId);
+		var dialog = new Microsoft.Win32.SaveFileDialog
+		{
+			Title = "Save Transcript",
+			Filter = "Web page (*.html)|*.html|Markdown (*.md)|*.md|Text (*.txt)|*.txt",
+			FileName = TranscriptExport.SuggestedName(label, DateTime.Now, TranscriptExport.Format.Html),
+			AddExtension = true,
+			OverwritePrompt = true,
+		};
+		if (dialog.ShowDialog(this) != true) return;
+
+		try
+		{
+			var text = await BuildTranscriptFileAsync(TranscriptExport.FormatOf(dialog.FileName), transcript);
+			if (text is null) return;
+			await System.IO.File.WriteAllTextAsync(dialog.FileName, text, new System.Text.UTF8Encoding(false));
+			ShowNotice($"Transcript saved to {dialog.FileName}");
+		}
+		catch (Exception ex)
+		{
+			MessageDialog.Ok(this, $"Could not save the transcript: {ex.Message}", "Save Transcript");
+		}
+	}
+
+	/// <summary>
+	/// The file contents for a format. The page form is read back out of
+	/// the live Rendered document, so it needs the renderer to be up; the
+	/// text forms come straight from the service and always work.
+	/// </summary>
+	private async Task<string?> BuildTranscriptFileAsync(TranscriptExport.Format format, ChatService transcript)
+	{
+		var title = $"TurboPilot transcript {DateTime.Now:yyyy-MM-dd HH:mm}";
+		if (format != TranscriptExport.Format.Html)
+		{
+			var source = format == TranscriptExport.Format.Markdown
+				? transcript.RenderedTranscript
+				: transcript.Transcript;
+			return TranscriptExport.Plain(title, source, format);
+		}
+
+		if (!_webViewReady || webViewOutput.CoreWebView2 is null)
+		{
+			MessageDialog.Ok(this,
+				"The Rendered tab is not available, so a web page cannot be saved. Save as .md or .txt instead.",
+				"Save Transcript");
+			return null;
+		}
+
+		var json = await webViewOutput.CoreWebView2.ExecuteScriptAsync(
+			"document.getElementById('output') ? document.getElementById('output').innerHTML : ''");
+		var body = System.Text.Json.JsonSerializer.Deserialize<string>(json) ?? string.Empty;
+
+		var web = System.IO.Path.Combine(AppContext.BaseDirectory, "web");
+		var pageCss = string.Empty;
+		try { pageCss = await System.IO.File.ReadAllTextAsync(System.IO.Path.Combine(web, "output.css")); }
+		catch (Exception) { /* Structure only; the theme below carries the look. */ }
+
+		return TranscriptExport.Html(title, pageCss, BorlandVisionTheme.BuildCss(), body,
+			TranscriptExport.FontDataUrl(web));
+	}
+
 	// -- Exit ------------------------------------------------------------------
 
 	/// <summary>
