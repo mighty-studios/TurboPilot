@@ -61,14 +61,16 @@
 
         <Menu DockPanel.Dock="Top">
             <MenuItem Header="_Session">
-                <MenuItem x:Name="menuNewSession" Header="_New Session..." Click="OnNewSession"/>
+                <!-- One entry for the whole session lifecycle. It opens the
+                     settings dialog either way; the caption says whether
+                     accepting would start a session or change the running
+                     one. Permissions and Customization open from inside
+                     that dialog, so they need no menu entry of their own. -->
+                <MenuItem x:Name="menuNewSession" Header="_Begin Session..." Click="OnNewSession"/>
                 <MenuItem x:Name="menuPastSessions" Header="_Past Sessions..." Click="OnPastSessions"/>
                 <Separator/>
-                <MenuItem x:Name="menuSettings" Header="Set_tings..." Click="OnSettings"/>
-                <MenuItem Header="C_ustomization..." Click="OnCustomization"/>
-                <MenuItem Header="Pe_rmissions..." Click="OnPermissions"/>
-                <Separator/>
-                <MenuItem x:Name="menuEndSession" Header="_End Session" Click="OnEndSessionClick"/>
+                <MenuItem x:Name="menuCompactContext" Header="_Compact Context" Click="OnCompactContext"/>
+                <MenuItem x:Name="menuResetContext" Header="_Reset Context" Click="OnResetContext"/>
                 <Separator/>
                 <MenuItem Header="E_xit" Click="OnExitClick"/>
             </MenuItem>

@@ -31,6 +31,15 @@ public sealed class CustomizationLibrary
 	public Dictionary<string, CustomizationItem> McpServers { get; set; } = new(PathComparer);
 
 	/// <summary>
+	/// True when the library found anything at all. A saved session with
+	/// an empty library predates customization snapshots and has nothing
+	/// to restore.
+	/// </summary>
+	[JsonIgnore]
+	public bool HasItems => Prompts.Count > 0 || Agents.Count > 0 || Skills.Count > 0
+		|| Instructions.Count > 0 || McpServers.Count > 0;
+
+	/// <summary>
 	/// Deep copy of all five maps and their items. Callers (such as the
 	/// Customization dialog) edit the copy freely; the original is untouched
 	/// until the copy is committed.

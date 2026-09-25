@@ -186,6 +186,11 @@ public sealed class ChatService : IAsyncDisposable
 				}
 				_historyActive = true;
 				_record.Options = _options;
+				// What the session is actually running with, kept so a resume
+				// can be given the same lists and grants rather than whatever
+				// the application holds whenever the resume happens.
+				_record.Customizations = _options.Customizations.Clone();
+				_record.Permissions = PermissionService.Snapshot(_options.WorkspaceFolder);
 				SaveUsage();
 			}
 			AddNotice(NoticeFormatter.Banner($"{(resumeId is null ? "Session" : "Resumed")} {SessionId} | {_options.Model} | {_options.Mode}"));
@@ -313,6 +318,51 @@ public sealed class ChatService : IAsyncDisposable
 			_sending.Release();
 		}
 	}
+
+	/// <summary>
+	/// Asks the runtime to compact the conversation: the older turns are
+	/// replaced with a summary and the tokens they held come back. A turn
+	/// in flight is interrupted first, because compaction rewrites the
+	/// history the turn is being answered from. The outcome is reported
+	/// in the transcript, including a compaction the runtime declined.
+	/// </summary>
+	public async Task CompactContextAsync(CancellationToken cancellationToken = default)
+	{
+		using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
+		await _sending.WaitAsync(linked.Token);
+		try
+		{
+			var session = _session ?? throw new InvalidOperationException("No active session.");
+			if (_isWorking)
+			{
+				await InterruptAsync(session, linked.Token);
+				AddNotice(NoticeFormatter.Status("interrupted", "Previous turn stopped"));
+			}
+			AddNotice(await CompactAsync(session, linked.Token));
+		}
+		finally
+		{
+			_sending.Release();
+			StateChanged?.Invoke();
+		}
+	}
+
+	// The compaction request type is marked for evaluation by the SDK. The call is isolated here so
+	// the suppression covers the RPC alone, and a later rename is one method to fix.
+#pragma warning disable GHCP001
+	private static async Task<(string Text, string Rendered)> CompactAsync(CopilotSession session, CancellationToken cancellationToken)
+	{
+		var result = await session.Rpc.History.CompactAsync(
+			new GitHub.Copilot.Rpc.SessionHistoryCompactRequest
+			{
+				Trigger = GitHub.Copilot.Rpc.SessionHistoryCompactRequestTrigger.Manual,
+			}, cancellationToken);
+		return result.Success
+			? NoticeFormatter.Status("compacted",
+				$"{result.MessagesRemoved} message(s) summarized, {result.TokensRemoved} token(s) freed")
+			: NoticeFormatter.Status("compacted", "The runtime had nothing to compact.");
+	}
+#pragma warning restore GHCP001
 
 	private async Task InterruptAsync(CopilotSession session, CancellationToken cancellationToken)
 	{
@@ -821,7 +871,7 @@ public sealed class ChatService : IAsyncDisposable
 			lock (_sync)
 			{
 				// Returning to the active settings withdraws a change that was waiting for the turn to end.
-				if (SessionChanges.Classify(_options, next) == SessionChange.Fresh)
+				if (SessionChanges.Classify(_options, next) == SessionChange.None)
 				{
 					_pendingChanges = null;
 					return false;

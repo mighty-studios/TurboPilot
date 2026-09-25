@@ -114,8 +114,8 @@ public partial class MainWindow : TurbolandWindow
 		// Initialize WebView2 asynchronously
 		_ = InitializeWebViewAsync();
 
-		// Ctrl+Enter in the prompt box sends the current input.
-		richTextBoxInput.PreviewKeyDown += Input_PreviewKeyDown;
+		// Ctrl+Enter sends the current input from anywhere in the window.
+		PreviewKeyDown += Input_PreviewKeyDown;
 
 		// No session is active until the user starts or resumes one.
 		SetSessionActive(false);
@@ -153,10 +153,13 @@ public partial class MainWindow : TurbolandWindow
 
 		var ready = active && !_sessionChanging && !_closing;
 		menuTools.IsEnabled = ready;
-		menuEndSession.IsEnabled = (active || _sessionChanging) && !_closing;
+		// One entry covers the whole lifecycle, so its caption has to say
+		// which half of it is on offer.
+		menuNewSession.Header = active ? "C_hange Session..." : "_Begin Session...";
 		menuNewSession.IsEnabled = !_sessionChanging && !_closing;
 		menuPastSessions.IsEnabled = !_sessionChanging && !_closing;
-		menuSettings.IsEnabled = !_sessionChanging && !_closing;
+		menuCompactContext.IsEnabled = ready && !_sendingInput;
+		menuResetContext.IsEnabled = ready && !_sendingInput;
 
 		richTextBoxInput.IsEnabled = ready;
 		UpdateHistoryButtons();
@@ -174,19 +177,26 @@ public partial class MainWindow : TurbolandWindow
 
 	/// <summary>
 	/// Repaints the session badge: the model in use and the session id
-	/// while a live session exists, otherwise a notice that none is active.
+	/// while a live session exists, otherwise a notice that none is
+	/// active. Both are written for machines and run long, so the badge
+	/// shows shortened forms and keeps the full pair in its tooltip.
 	/// </summary>
 	private void UpdateSessionInfo()
 	{
 		if (_chat is not null && _sessionId is not null)
 		{
-			sessionInfo.Text = string.IsNullOrEmpty(_sessionModel)
+			var model = ShortText.Model(_sessionModel);
+			sessionInfo.Text = model.Length == 0
+				? ShortText.SessionId(_sessionId)
+				: $"{model} | {ShortText.SessionId(_sessionId)}";
+			sessionInfo.ToolTip = string.IsNullOrEmpty(_sessionModel)
 				? _sessionId
-				: $"{_sessionModel} | {_sessionId}";
+				: $"{_sessionModel}\r\n{_sessionId}";
 		}
 		else
 		{
 			sessionInfo.Text = "No session active";
+			sessionInfo.ToolTip = null;
 		}
 	}
 
@@ -721,21 +731,18 @@ public partial class MainWindow : TurbolandWindow
 	// ── Session settings ─────────────────────────────────────────────────────
 
 	/// <summary>
-	/// Opens the Session Settings dialog from New Session.
+	/// Session menu: opens the Session Settings dialog, which begins a
+	/// session or changes the running one depending on what is chosen
+	/// there.
 	/// </summary>
 	private async void OnNewSession(object sender, RoutedEventArgs e) => await OpenSettingsDialogAsync();
 
 	/// <summary>
-	/// Opens the Session Settings dialog from the menu.
-	/// </summary>
-	private async void OnSettings(object sender, RoutedEventArgs e) => await OpenSettingsDialogAsync();
-
-	/// <summary>
-	/// Shows the Session Settings dialog. Begin Session brings the
+	/// Shows the Session Settings dialog. Accepting brings the
 	/// session-dependent controls online, refreshes the customization
 	/// lists for the new workspace and starts the streaming session
-	/// with the gathered options. Ending a session is the Session menu's
-	/// End Session item.
+	/// with the gathered options, or applies the changes to the running
+	/// session when that is all they amount to.
 	/// </summary>
 	private async Task OpenSettingsDialogAsync()
 	{
@@ -767,6 +774,8 @@ public partial class MainWindow : TurbolandWindow
 		{
 			var current = IsSessionActive ? _chat : null;
 			var change = current is null ? SessionChange.Fresh : SessionChanges.Classify(current.RequestedOptions, options);
+			if (change == SessionChange.None)
+				return;
 			if (change == SessionChange.Live)
 			{
 				try
@@ -849,15 +858,11 @@ public partial class MainWindow : TurbolandWindow
 	}
 
 	/// <summary>
-	/// Session menu: ends the active session.
-	/// </summary>
-	private async void OnEndSessionClick(object sender, RoutedEventArgs e) => await EndSessionAsync();
-
-	/// <summary>
 	/// Ends the active session: disposes the SDK session, gates the
 	/// session-dependent controls back off and clears the workspace
 	/// scope. Session history and settings persist; only the live
-	/// session state goes away.
+	/// session state goes away. There is no menu entry for this: a
+	/// session ends when another replaces it or the window closes.
 	/// </summary>
 	public async Task EndSessionAsync()
 	{
@@ -911,9 +916,14 @@ public partial class MainWindow : TurbolandWindow
 		SetSessionActive(IsSessionActive);
 		try
 		{
+			// A resume arrives carrying the lists its session ran with, and
+			// those stand. Anything else scans the roots afresh for the
+			// workspace it is about to open.
 			options = options with
 			{
-				Customizations = _collectCustomizations(options.WorkspaceFolder).Clone(),
+				Customizations = (resumeId is not null && options.Customizations.HasItems
+					? options.Customizations
+					: _collectCustomizations(options.WorkspaceFolder)).Clone(),
 			};
 			await EndChatCoreAsync();
 			cancellation.Token.ThrowIfCancellationRequested();
@@ -1037,7 +1047,18 @@ public partial class MainWindow : TurbolandWindow
 			}
 
 			var options = RestoreSessionOptions(selected, Settings.Load());
+			// The session's own grants come back before it connects, so the
+			// first permission check of the resumed session answers the way
+			// the original session would have.
+			var permissionsRestored = Permissions.PermissionService.Restore(options.WorkspaceFolder, selected.Permissions);
 			await StartChatAsync(options, selected.SessionId);
+			if (permissionsRestored && _chat is not null)
+			{
+				var chat = _chat;
+				var (text, rendered) = NoticeFormatter.Status("permissions",
+					"Restored the folder grants and approved operations saved with this session.");
+				chat.AddNotice(text, rendered);
+			}
 		}
 		catch (Exception ex)
 		{
@@ -1045,9 +1066,20 @@ public partial class MainWindow : TurbolandWindow
 		}
 	}
 
+	/// <summary>
+	/// The options a saved session resumes on. The customization lists
+	/// come from the session's own snapshot when it has one, so the
+	/// resumed session runs with the instructions, skills, agents and
+	/// servers it had rather than whatever is enabled today; a session
+	/// saved before snapshots existed falls back to a fresh scan. The
+	/// BYOK key is never stored, so it has to come from settings, and it
+	/// only applies when the endpoint still matches the one saved.
+	/// </summary>
 	internal static ChatSessionOptions RestoreSessionOptions(SessionRecord saved, Settings settings)
 	{
 		var options = saved.Options;
+		if (saved.Customizations.HasItems)
+			options = options with { Customizations = saved.Customizations.Clone() };
 		if (!options.UseByok)
 			return options;
 		var matchingEndpoint = string.Equals(options.ByokEndpoint.TrimEnd('/'),
@@ -1171,42 +1203,98 @@ public partial class MainWindow : TurbolandWindow
 	}
 
 	/// <summary>
-	/// Ctrl+Enter in the prompt box sends, like every other chat front
-	/// end this machine has ever run.
+	/// Ctrl+Enter sends, like every other chat front end this machine has
+	/// ever run. The handler is on the window rather than the prompt box
+	/// so the shortcut works wherever focus happens to be: tunneling
+	/// starts at the root, so this still runs first when the prompt box
+	/// has focus, and handling the key there stops it reaching the
+	/// editor as a newline.
 	/// </summary>
 	private void Input_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
 	{
-		if (e.Key == System.Windows.Input.Key.Enter
-			&& (System.Windows.Input.Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Control) != 0)
-		{
-			e.Handled = true;
+		if (e.Handled) return;
+		if (!IsSendShortcut(e.Key == System.Windows.Input.Key.System ? e.SystemKey : e.Key,
+			System.Windows.Input.Keyboard.Modifiers))
+			return;
+		e.Handled = true;
+		if (buttonSend.IsEnabled)
 			_ = SendCurrentInputAsync();
+	}
+
+	/// <summary>
+	/// Whether a key press is the Send shortcut. Enter alone is a newline
+	/// in the prompt editor, so only Ctrl+Enter sends, and no other
+	/// modifier may be along for the ride: Ctrl+Shift+Enter belongs to
+	/// whatever claims it later, not to Send.
+	/// </summary>
+	internal static bool IsSendShortcut(System.Windows.Input.Key key, System.Windows.Input.ModifierKeys modifiers) =>
+		key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Return
+		&& modifiers == System.Windows.Input.ModifierKeys.Control;
+
+	// ── Session context ──────────────────────────────────────────────────────
+
+	/// <summary>
+	/// Session menu: asks the runtime to compact the conversation, which
+	/// replaces the older turns with a summary and frees the tokens they
+	/// were holding. The transcript on screen is left alone: it is the
+	/// record of what happened, and compaction changes only what the
+	/// model still carries.
+	/// </summary>
+	private async void OnCompactContext(object sender, RoutedEventArgs e)
+	{
+		var chat = _chat;
+		if (chat is null || !IsSessionActive || _sendingInput || _closing) return;
+		if (!YesNoDialog.Ask(this,
+			"Compact this session's context? Older turns are replaced by a summary.\r\n\r\n"
+			+ "The transcript on screen is unchanged.", "Compact Context"))
+			return;
+
+		_sendingInput = true;
+		SetSessionActive(IsSessionActive);
+		try { await chat.CompactContextAsync(); }
+		catch (OperationCanceledException) { }
+		catch (Exception ex)
+		{
+			var (text, rendered) = NoticeFormatter.Status("error", "Cannot compact the context: " + ex.Message);
+			ForActiveChat(chat, () => chat.AddNotice(text, rendered));
+		}
+		finally
+		{
+			_sendingInput = false;
+			RefreshChatState();
 		}
 	}
 
 	/// <summary>
-	/// Opens the Customization dialog for editing the search folder list.
-	/// Modal and owned: the OS keeps it above the main window (and its
-	/// WebView2 airspace), and the blocking call means it cannot stack
-	/// a duplicate. The dialog persists the list to settings itself.
+	/// Session menu: throws the conversation away and reconnects on the
+	/// same settings, so the model starts from nothing. This is the
+	/// deliberate opposite of the restart hand-off: no summary travels,
+	/// which is the point. The transcript is kept and a banner marks
+	/// where the context was dropped.
 	/// </summary>
-	private void OnCustomization(object sender, RoutedEventArgs e)
+	private async void OnResetContext(object sender, RoutedEventArgs e)
 	{
-		new Dialogs.CustomizeDialog().ShowDialog(this);
-	}
+		var chat = _chat;
+		if (chat is null || !IsSessionActive || _sendingInput || _closing) return;
+		if (!YesNoDialog.Ask(this,
+			"Reset this session's context? The model forgets the conversation so far.\r\n\r\n"
+			+ "The transcript on screen is kept, and nothing is carried into the new session.",
+			"Reset Context"))
+			return;
 
-	// ── Permissions ──────────────────────────────────────────────────────────
-
-	/// <summary>
-	/// Opens the Permissions dialog. It edits the file access entries that
-	/// belong to the active workspace, or the application defaults when no
-	/// session is running. Modal and owned: the OS keeps it above the main
-	/// window (and its WebView2 airspace), and the blocking call means it
-	/// cannot stack a duplicate.
-	/// </summary>
-	private void OnPermissions(object sender, RoutedEventArgs e)
-	{
-		new Dialogs.PermissionsDialog(ActiveWorkspacePath).ShowDialog(this);
+		var options = chat.RequestedOptions;
+		var transcript = OutputText;
+		var rendered = RenderedText;
+		await StartChatCoreAsync(options, null, null);
+		if (_chat is null)
+			return;
+		// StartChatCoreAsync clears both views for the new session. The
+		// conversation is gone from the model, not from the record of it.
+		ClearOutput();
+		AppendRawOutput(transcript);
+		AppendRenderedOutput(rendered);
+		var (text, banner) = NoticeFormatter.Status("reset", "Context cleared. The model starts from nothing.");
+		_chat.AddNotice(text, banner);
 	}
 
 	// -- Tools -----------------------------------------------------------------

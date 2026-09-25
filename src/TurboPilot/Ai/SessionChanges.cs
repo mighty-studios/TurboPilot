@@ -4,7 +4,9 @@ namespace TurboPilot.Ai;
 
 public enum SessionChange
 {
-	// A new session without carried context: no running session, another workspace, or no changes.
+	// Nothing to do: the running session already has these settings.
+	None,
+	// A new session without carried context: no running session, or another workspace.
 	Fresh,
 	// Model, reasoning effort, built-in mode, and file linking change on the running session.
 	Live,
@@ -14,6 +16,12 @@ public enum SessionChange
 
 public static class SessionChanges
 {
+	/// <summary>
+	/// What starting <paramref name="next"/> would do to the running
+	/// session described by <paramref name="current"/>: leave it alone,
+	/// replace it outright, change it in place, or restart it with a
+	/// hand-off on offer.
+	/// </summary>
 	public static SessionChange Classify(ChatSessionOptions current, ChatSessionOptions next)
 	{
 		if (!SameWorkspace(current.WorkspaceFolder, next.WorkspaceFolder) || string.IsNullOrWhiteSpace(current.WorkspaceFolder))
@@ -29,7 +37,7 @@ public static class SessionChanges
 		return current.Model != next.Model || (current.ReasoningEffort ?? "") != (next.ReasoningEffort ?? "")
 			|| current.Mode != next.Mode || current.LinkFiles != next.LinkFiles
 			|| current.ContextWindowTokens != next.ContextWindowTokens
-			? SessionChange.Live : SessionChange.Fresh;
+			? SessionChange.Live : SessionChange.None;
 	}
 
 	public static bool IsBuiltInMode(string mode) => mode is "Standard" or "Plan" or "Autopilot";

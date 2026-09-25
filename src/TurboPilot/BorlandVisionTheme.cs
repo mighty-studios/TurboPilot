@@ -294,6 +294,12 @@ public static class BorlandVisionTheme
 			Semantic.Warning),
 		new(".kp-status-tool .kp-status-text", "Name of a running tool",
 			Semantic.Info),
+		new(".kp-status-compacted .kp-status-tag, .kp-status-compacted .kp-status-text", "Context compaction result",
+			Semantic.Success),
+		new(".kp-status-reset .kp-status-tag, .kp-status-reset .kp-status-text", "Context cleared on request",
+			Semantic.Warning),
+		new(".kp-status-permissions .kp-status-tag, .kp-status-permissions .kp-status-text", "Permissions restored with a session",
+			Semantic.Info),
 		new(".kp-banner", "Session banner",
 			Palette.LightGray, Palette.DeepBlue),
 

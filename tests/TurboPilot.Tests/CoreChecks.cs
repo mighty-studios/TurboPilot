@@ -4,6 +4,8 @@ using GitHub.Copilot;
 using TurboPilot.Ai;
 using TurboPilot.Customizations;
 using TurboPilot.Dialogs;
+using TurboPilot.Permissions;
+using TurboPilot.Rendering;
 using TurboPilot.Sessions;
 using TurboPilot.Tools;
 
@@ -17,6 +19,8 @@ internal static class CoreChecks
 		CheckApplicationInstructions();
 		CheckExternalTools();
 		CheckWorkspaceReadme();
+		CheckShortText();
+		CheckSessionSnapshot();
 		CheckStorage();
 		await CheckQuestionsAsync();
 		await CheckEventsAsync();
@@ -178,6 +182,77 @@ internal static class CoreChecks
 		var prompt = WorkspaceReadme.Prompt(markdown);
 		Check.True(prompt.Contains("README.md") && prompt.Contains("wait for my instructions")
 			&& prompt.Contains("do not start any work yet"), "Ask only for orientation, then a stop.");
+	}
+
+	/// <summary>
+	/// The shortening behind the session badge and the Past Sessions
+	/// rows. Model IDs and descriptions are what drive a dialog past the
+	/// width it was given, so the guarantee is a hard ceiling, not a
+	/// tidier average.
+	/// </summary>
+	private static void CheckShortText()
+	{
+		Check.Equal("short", ShortText.Clip("  short  ", 20), "Leave text within budget alone, trimmed");
+		Check.Equal("", ShortText.Clip("anything", 0), "A budget of nothing yields nothing");
+		Check.Equal(10, ShortText.Clip(new string('x', 400), 10).Length, "Never exceed the budget, ellipsis included");
+		Check.True(ShortText.Clip(new string('x', 400), 10).EndsWith("...", StringComparison.Ordinal), "Mark text that was cut.");
+		Check.Equal("ab", ShortText.Clip("abcdef", 2), "A budget too small for an ellipsis just cuts");
+
+		Check.Equal("qwen3-coder-30b:4",
+			ShortText.Model("Qwen3-Coder-30B-A3B-Instruct-GGUF/qwen3-coder-30b:4"),
+			"Keep the segment that distinguishes one model from another");
+		Check.Equal("gpt-5", ShortText.Model("gpt-5"), "Leave an unqualified model alone");
+		Check.Equal("publisher/", ShortText.Model("publisher/", 34), "A trailing separator is not a segment break");
+		Check.Equal(34, ShortText.Model("vendor/" + new string('m', 200)).Length, "Clip the segment too");
+
+		var record = new SessionRecord
+		{
+			SessionId = "workspace-" + new string('9', 60),
+			Options = new ChatSessionOptions { Model = "registry.example.com/org/" + new string('m', 120) },
+			Description = new string('d', 400),
+		};
+		Check.True(record.DisplayLabel.Length < 140, "A Past Sessions row must stay a predictable width.");
+		record.Description = "";
+		Check.True(record.DisplayLabel.Length < 90 && record.DisplayLabel.Contains("workspace-"),
+			"A row without a description still names its session.");
+	}
+
+	/// <summary>
+	/// The settings a session carries: the customization lists it ran
+	/// with and the permissions in force, saved with the record and given
+	/// back on resume. Without these a resumed session silently adopts
+	/// whatever is configured at the moment it is reopened.
+	/// </summary>
+	private static void CheckSessionSnapshot()
+	{
+		using var workspace = new TestWorkspace();
+		var library = new CustomizationLibrary();
+		Check.True(!library.HasItems, "An empty library has nothing to restore.");
+		var instruction = workspace.Write("instructions\\house.instructions.md", "House rules.");
+		library.Instructions[instruction] = new() { Name = "house", FilePath = instruction, Enabled = false };
+		Check.True(library.HasItems, "A library with an item has something to restore.");
+
+		var options = new ChatSessionOptions { WorkspaceFolder = workspace.Workspace, Model = "test-model" };
+		var record = workspace.Store.Create("snapshot-1", options, "");
+		record.Customizations = library.Clone();
+		record.Permissions = new PermissionScope
+		{
+			Folders = [new PermissionEntry { FolderPath = workspace.Root, Access = PermissionAccess.Read }],
+			Operations = ["shell"],
+		};
+		workspace.Store.Save(record);
+
+		var loaded = workspace.Store.Load("snapshot-1");
+		Check.Equal(1, loaded.Customizations.Instructions.Count, "Save the customization lists with the session");
+		Check.True(!loaded.Customizations.Instructions[instruction].Enabled, "Restore the enabled state, not just the item.");
+		Check.Equal(workspace.Root, loaded.Permissions.Folders.Single().FolderPath, "Save the folder grants with the session");
+		Check.Equal("shell", loaded.Permissions.Operations!.Single(), "Save the approved operations with the session");
+
+		var restored = MainWindow.RestoreSessionOptions(loaded, new Settings());
+		Check.Equal(1, restored.Customizations.Instructions.Count, "Resume on the session's own lists");
+		var bare = workspace.Store.Create("snapshot-2", options, "");
+		Check.True(!MainWindow.RestoreSessionOptions(bare, new Settings()).Customizations.HasItems,
+			"A session saved without a snapshot must fall back to a fresh scan.");
 	}
 
 	private static void CheckStorage()

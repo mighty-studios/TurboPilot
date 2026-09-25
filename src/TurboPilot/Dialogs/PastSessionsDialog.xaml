@@ -2,14 +2,25 @@
 					xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
 					xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
 					xmlns:ctl="clr-namespace:TurbolandTheme.Wpf.Controls;assembly=TurbolandTheme.Wpf"
-					Title="Past Sessions" MinWidth="700">
-	<StackPanel Margin="10">
+					Title="Past Sessions" MinWidth="700" MaxWidth="960">
+	<!-- The list is sized, not grown. A session row carries a model name and
+	     a description that are both written for machines, so letting the list
+	     ask for the width it wants drags the dialog past any sane size. The
+	     content panel states its width, rows that overrun it scroll
+	     horizontally, and each row offers its whole label as a tooltip. -->
+	<StackPanel Margin="10" Width="900">
 		<Label Content="Find by session ID, workspace, or prompt"/>
 		<TextBox x:Name="textSearch" TextChanged="OnSearchChanged" Margin="0,4,0,8"/>
 		<ListBox x:Name="listSessions" Height="220" DisplayMemberPath="DisplayLabel"
 				SelectionMode="Single" SelectionChanged="OnSelectionChanged"
-				ScrollViewer.HorizontalScrollBarVisibility="Auto"/>
-		<TextBlock x:Name="textDetails" Margin="0,10,0,0" TextWrapping="Wrap" MaxWidth="670"/>
+				ScrollViewer.HorizontalScrollBarVisibility="Auto">
+			<ListBox.ItemContainerStyle>
+				<Style TargetType="ListBoxItem">
+					<Setter Property="ToolTip" Value="{Binding DisplayLabel}"/>
+				</Style>
+			</ListBox.ItemContainerStyle>
+		</ListBox>
+		<TextBlock x:Name="textDetails" Margin="0,10,0,0" TextWrapping="Wrap" MaxWidth="880"/>
 		<StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
 			<Button Content="Cancel" IsCancel="True" Click="OnCancel" Margin="0,0,12,0"/>
 			<Button x:Name="buttonView" Content="View" Click="OnView" Margin="0,0,12,0"/>

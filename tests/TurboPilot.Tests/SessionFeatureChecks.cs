@@ -35,7 +35,7 @@ internal static class SessionFeatureChecks
 
 	private static void CheckClassification(TestWorkspace workspace, ChatSessionOptions options)
 	{
-		Check.Equal(SessionChange.Fresh, SessionChanges.Classify(options, options), "Unchanged settings start a fresh session");
+		Check.Equal(SessionChange.None, SessionChanges.Classify(options, options), "Unchanged settings change nothing");
 		Check.Equal(SessionChange.Fresh, SessionChanges.Classify(options, options with { WorkspaceFolder = workspace.Root }), "Another workspace starts fresh");
 		Check.Equal(SessionChange.Live, SessionChanges.Classify(options, options with { Model = "test-model-two" }), "Switch the model live");
 		Check.Equal(SessionChange.Live, SessionChanges.Classify(options, options with { ReasoningEffort = "low" }), "Change the effort live");

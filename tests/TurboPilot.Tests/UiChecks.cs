@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
+using System.Windows.Input;
 using System.Windows.Threading;
 using Microsoft.Web.WebView2.Wpf;
 using TurboPilot.Ai;
@@ -197,6 +198,10 @@ internal static class UiChecks
 			Check.True(!window.IsSessionActive, "Start without an active session.");
 			Check.True(!Control<Button>(window, "buttonSend").IsEnabled, "Disable Send before startup.");
 			Check.True(!Control<MenuItem>(window, "menuTools").IsEnabled, "Offer no tools without a workspace to open them on.");
+			Check.Equal("_Begin Session...", Control<MenuItem>(window, "menuNewSession").Header, "Offer to begin a session when none is running");
+			Check.True(!Control<MenuItem>(window, "menuCompactContext").IsEnabled
+				&& !Control<MenuItem>(window, "menuResetContext").IsEnabled,
+				"There is no context to compact or reset without a session.");
 			Check.Equal("Start or resume a session to begin.", Status(window), "Initial status");
 			window.Show();
 			await Check.UntilAsync(() => Field<bool>(window, "_webViewReady"), "The rendered output did not initialize.");
@@ -209,7 +214,12 @@ internal static class UiChecks
 			Check.True(window.IsSessionActive && Status(window).StartsWith("Ready.."), "Enable a fully started session.");
 			Check.True(Control<Button>(window, "buttonSend").IsEnabled, "Enable Send after startup.");
 			Check.True(!Status(window).Contains("AiC="), "Do not show cloud credits for a local provider.");
+			Check.Equal("C_hange Session...", Control<MenuItem>(window, "menuNewSession").Header, "Offer to change the session once one is running");
+			Check.True(Control<MenuItem>(window, "menuCompactContext").IsEnabled
+				&& Control<MenuItem>(window, "menuResetContext").IsEnabled,
+				"Offer the context actions of a running session.");
 			CheckTools(application, window, workspace);
+			CheckSettingsCaptions(workspace);
 
 			var reply = new LocalProvider.Reply("**UI streaming reply**\n\n```mermaid\ngraph TD\nA[Input] --> B[Output]\n```");
 			provider.Replies.Enqueue(reply);
@@ -224,6 +234,12 @@ internal static class UiChecks
 			var rawText = new TextRange(raw.Document.ContentStart, raw.Document.ContentEnd).Text;
 			Check.Equal(Normalize(window.OutputText), Normalize(rawText), "The Raw tab must contain the complete transcript");
 			Check.Equal("", Input(window), "Clear accepted input");
+			Check.True(MainWindow.IsSendShortcut(Key.Enter, ModifierKeys.Control)
+				&& MainWindow.IsSendShortcut(Key.Return, ModifierKeys.Control), "Ctrl+Enter must send.");
+			Check.True(!MainWindow.IsSendShortcut(Key.Enter, ModifierKeys.None)
+				&& !MainWindow.IsSendShortcut(Key.Enter, ModifierKeys.Control | ModifierKeys.Shift)
+				&& !MainWindow.IsSendShortcut(Key.S, ModifierKeys.Control),
+				"Plain Enter writes a newline and other combinations are not Send.");
 
 			var rendered = false;
 			for (var attempt = 0; attempt < 100 && !rendered; attempt++)
@@ -445,6 +461,60 @@ internal static class UiChecks
 	/// starting anything, and confirms the PowerShell item still
 	/// provisions the helper functions on its way there.
 	/// </summary>
+	/// <summary>
+	/// The primary button has to name the action it is about to take.
+	/// Re-accepting an untouched dialog on a running session used to
+	/// restart it, so "OK" versus "Begin Session" is a behavior
+	/// difference the user can see before clicking.
+	/// </summary>
+	private static void CheckSettingsCaptions(TestWorkspace workspace)
+	{
+		// Constructing a Window registers it with the application, so every
+		// dialog opened here has to be closed again or later checks see a
+		// stray pop-up.
+		var opened = new List<SettingsDialog>();
+		try
+		{
+			Check.Equal("Begin Session", Caption(Prepare(null)), "Offer to begin when nothing is running");
+
+			// The settings a fresh dialog describes are, by definition, the
+			// settings a session started from it is running on.
+			var running = (ChatSessionOptions)Invoke(Prepare(null), "BuildOptions", workspace.Workspace)!;
+			var dialog = Prepare(running);
+			Check.Equal(SessionChange.None, dialog.PendingChange, "An untouched dialog must not restart the session");
+			Check.Equal("OK", Caption(dialog), "Say OK when accepting the dialog changes nothing");
+
+			Control<ComboBox>(dialog, "comboMode").SelectedItem = "Plan";
+			Check.Equal("Apply Changes", Caption(dialog), "Say Apply Changes for a switch the running session can take");
+
+			Control<CheckBox>(dialog, "checkApplyInstructions").IsChecked = false;
+			Invoke(dialog, "UpdateBeginCaption");
+			Check.Equal("Begin Session", Caption(dialog), "Say Begin Session for a change that needs a new session");
+			Console.WriteLine("PASS settings dialog primary button captions");
+		}
+		finally
+		{
+			foreach (var dialog in opened) dialog.Close();
+		}
+
+		static string Caption(SettingsDialog dialog) =>
+			(string)Control<Button>(dialog, "buttonBeginSession").Content;
+
+		// The dialog normally fills its model list from a live query; the
+		// captions only need a selection to exist.
+		SettingsDialog Prepare(ChatSessionOptions? running)
+		{
+			var dialog = new SettingsDialog(workspace.Workspace, running);
+			opened.Add(dialog);
+			var model = new AvailableModel { Id = "test-model", ContextWindowTokens = 32768 };
+			SetField(dialog, "_models", (IReadOnlyList<AvailableModel>)[model]);
+			var combo = Control<ComboBox>(dialog, "comboModel");
+			combo.ItemsSource = new[] { model.DisplayLabel };
+			combo.SelectedIndex = 0;
+			return dialog;
+		}
+	}
+
 	private static void CheckTools(Application application, MainWindow window, TestWorkspace workspace)
 	{
 		Check.True(Control<MenuItem>(window, "menuTools").IsEnabled, "Offer the tools of a running session.");

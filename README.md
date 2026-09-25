@@ -4,7 +4,7 @@ A retro Windows desktop interface for modern language models, with streamed chat
 
 ## Basic chat
 
-Open **Session -> New Session**, choose an existing workspace and service, query the available models, and select a model, reasoning effort, and mode. **Begin Session** connects the runtime. Cloud chat uses your authenticated CLI profile; BYOK chat uses the configured endpoint and API key.
+Open **Session -> Begin Session**, choose an existing workspace and service, query the available models, and select a model, reasoning effort, and mode. The primary button names what it will do: **Begin Session** starts one, **Apply Changes** adjusts the running session, and **OK** simply closes when nothing was changed. Cloud chat uses your authenticated CLI profile; BYOK chat uses the configured endpoint and API key. The BYOK host, port, path, and key are remembered while the CLI is selected, so returning to BYOK finds the last server already filled in.
 
 Send a prompt with **Send** or **Ctrl+Enter**. Sending while a response is running interrupts that turn before starting the replacement. **Stop** interrupts without sending another prompt. The attachment button manages the next prompt's files; the arrows recall earlier prompts and restore an unsent draft.
 
@@ -12,7 +12,11 @@ The **Model Output** heading sits above the Raw and Rendered tabs, and the **Use
 
 The **Raw** tab preserves streamed conversation text. **Rendered** supports markdown and Mermaid diagrams, plus links and image previews for local files that replies mention. Questions and permission requests appear in chat: reply with an option number or its text, or a freeform answer when offered. Invalid answers leave the question pending. Plan approval also happens in chat. In **Rendered**, a question or permission request is framed as a card with its choices numbered, tool steps and errors appear as tagged status lines, and each session starts under a banner; **Raw** keeps the same information as plain lines.
 
-The status line shows `Starting..`, `Ready..`, `Working..`, or `Waiting..`, followed by context usage in whole Ki tokens. Cloud sessions also display whole AI Credits as `AiC=<value>`.
+The status line shows `Starting..`, `Ready..`, `Working..`, or `Waiting..`, followed by context usage in whole Ki tokens. Cloud sessions also display whole AI Credits as `AiC=<value>`. Long model IDs and session IDs are shortened to keep the status line and the Past Sessions list at a readable width; hover either to see the full value.
+
+## Managing context
+
+**Session -> Compact Context** asks the session to summarize its own history, freeing the space that history occupied while keeping what the conversation established. **Session -> Reset Context** goes further and starts the session over with an empty history on the same settings. Both confirm first, both interrupt a running turn, and both leave the on-screen transcript intact: what you see is unchanged, only what the model still remembers is reduced. Neither is available until a session is ready.
 
 ## Opening a project
 
@@ -36,7 +40,7 @@ Each program runs on its own. TurboPilot neither waits for it nor closes it, and
 
 ## Changing a running session
 
-**Session -> Settings** also changes a running session. The model, reasoning effort, Standard/Plan/Autopilot mode, and file-link setting apply to the running session, which keeps its conversation. Changes requested during a turn wait until that turn ends, or apply just before your next prompt if you interrupt it; choosing the running settings again withdraws a waiting change. Other changes start a new session: the service, endpoint, or key; instruction or skill loading; a custom agent mode; or a different context window for a BYOK model.
+**Session -> Change Session** reopens the same settings dialog on a running session, and Customization and Permissions open from inside it. The model, reasoning effort, Standard/Plan/Autopilot mode, and file-link setting apply to the running session, which keeps its conversation. Accepting the dialog without changing anything does nothing at all. Changes requested during a turn wait until that turn ends, or apply just before your next prompt if you interrupt it; choosing the running settings again withdraws a waiting change. Other changes start a new session: the service, endpoint, or key; instruction or skill loading; a custom agent mode; or a different context window for a BYOK model.
 
 When the replaced session has a conversation, a confirmation offers to carry it forward. The current session model writes a hand-off summary, and your opening request and four most recent requests are quoted exactly, so constraints you stated are not lost to summarizing. The context accompanies the first prompt of the new session; it does not trigger autonomous work or appear in the transcript. Declining starts fresh.
 
@@ -46,13 +50,15 @@ TurboPilot appends its own presentation instructions after the enabled instructi
 
 The file is read on every new or resumed session, even when **Apply Instructions** is off (that toggle controls customization instructions only). Edits do not change an already running session or a live model switch. An empty file intentionally supplies no app guidance; deleting it restores the defaults on the next start. An unreadable file or malformed YAML header reports an error and prevents startup rather than silently dropping the instructions.
 
-**Session -> Customization** controls the enabled instructions, skills, agents, and MCP servers. **Apply Instructions** loads only enabled instruction bodies, retaining their file scopes. **Preload Skills** loads enabled skill bodies and registers their resource folders; turning it off also disables automatic skill loading. Custom agent modes load their prompts and tool restrictions.
+**Session -> Customization** controls the enabled instructions, skills, agents, and MCP servers, and opens from the settings dialog. **Apply Instructions** loads only enabled instruction bodies, retaining their file scopes. **Preload Skills** loads enabled skill bodies and registers their resource folders; turning it off also disables automatic skill loading. Custom agent modes load their prompts and tool restrictions.
 
 Customization changes apply when starting or resuming a session. Automatic discovery is suppressed so it cannot restore unchecked items. Permissions remain live and apply to the next request. **Autopilot approves every permission request**, so use it only with a trusted workspace and tools.
 
 ## Saved sessions
 
-**Session -> Past Sessions** searches saved sessions by ID, workspace, or prompt. **View** opens a transcript without connecting. **Resume** restores the original conversation, workspace, model settings, usage, and prompt history, using the current customization and permission selections. Ending a session or exiting preserves its history.
+**Session -> Past Sessions** searches saved sessions by ID, workspace, or prompt. **View** opens a transcript without connecting. **Resume** restores the original conversation, workspace, model settings, usage, and prompt history.
+
+A session records the customization selections and permissions it ran under, so resuming returns to the setup you had rather than whatever is configured now. Restored permissions are noted in the transcript. Sessions saved before this was recorded fall back to the current selections. Exiting preserves a session's history.
 
 The window close button and **Session -> Exit** share one confirmation. Declining leaves the app running; accepting finishes cleanup before closing, without repeating the confirmation if another close request arrives.
 

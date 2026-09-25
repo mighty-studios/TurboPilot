@@ -48,7 +48,7 @@ public partial class AboutDialog : TurbolandFloatingDialog
 			"by VileR, https://int10h.org/oldschool-pc-fonts/",
 			"used under license [CC BY-SA 4.0]",
 			"",
-			"Copyright (c) 2026 Mighty Studios",
+			"Copyright 2026 Mighty Studios, LLC. All rights reserved.",
 			"www.mightystudios.com",
 			"https://github.com/mighty-studios/TurboPilot",
 			""

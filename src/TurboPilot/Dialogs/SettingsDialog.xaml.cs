@@ -116,12 +116,21 @@ public partial class SettingsDialog : TurbolandFloatingDialog
 		PopulateModes(settings.SelectedMode);
 		UpdateServiceFields();
 		UpdateEndpointPreview();
+		UpdateBeginCaption();
 
 		textBoxWorkspacePath.TextChanged += (_, _) =>
 		{
 			UpdateBeginEnabled();
 			PopulateModes(comboMode.SelectedItem as string ?? "Standard");
 		};
+		// Every control that feeds BuildOptions has to repaint the caption,
+		// or the button can still read "OK" after a choice that restarts.
+		comboMode.SelectionChanged += (_, _) => UpdateBeginCaption();
+		comboEffort.SelectionChanged += (_, _) => UpdateBeginCaption();
+		checkApplyInstructions.Click += (_, _) => UpdateBeginCaption();
+		checkPreloadSkills.Click += (_, _) => UpdateBeginCaption();
+		checkLinkFiles.Click += (_, _) => UpdateBeginCaption();
+		textBoxApiKey.TextChanged += (_, _) => UpdateBeginCaption();
 
 		// Contact the configured service as soon as the dialog is up so the
 		// model list is populated without an extra click.
@@ -134,14 +143,30 @@ public partial class SettingsDialog : TurbolandFloatingDialog
 
 	private void OnServiceChanged(object sender, RoutedEventArgs e)
 	{
+		// The BYOK fields are remembered even while the CLI is selected, so
+		// coming back to BYOK finds the last server already filled in. A
+		// field the user emptied by hand stays empty; only a blank set is
+		// repopulated, which is the case where nothing has been typed yet.
+		if (IsByok && textBoxHost.Text.Trim().Length == 0 && textBoxPort.Text.Trim().Length == 0)
+		{
+			var settings = Settings.Load();
+			SplitEndpoint(settings.ByokEndpoint, out var host, out var port, out var path);
+			textBoxHost.Text = host;
+			textBoxPort.Text = port;
+			textBoxPath.Text = path;
+			if (textBoxApiKey.Text.Length == 0)
+				textBoxApiKey.Text = settings.ByokApiKey;
+		}
 		UpdateServiceFields();
 		UpdateEndpointPreview();
+		UpdateBeginCaption();
 		if (IsLoaded) _ = QueryServiceAsync();
 	}
 
 	private void OnByokFieldChanged(object sender, TextChangedEventArgs e)
 	{
 		UpdateEndpointPreview();
+		UpdateBeginCaption();
 	}
 
 	private void UpdateServiceFields()
@@ -253,7 +278,7 @@ public partial class SettingsDialog : TurbolandFloatingDialog
 	private void OnModelChanged(object sender, SelectionChangedEventArgs e)
 	{
 		if (_suppressEvents) return;
-
+		UpdateBeginCaption();
 		var index = comboModel.SelectedIndex;
 		if (index < 0 || index >= _models.Count)
 		{
@@ -347,6 +372,57 @@ public partial class SettingsDialog : TurbolandFloatingDialog
 	private void UpdateBeginEnabled()
 	{
 		buttonBeginSession.IsEnabled = ValidatedWorkspacePath() != null;
+		UpdateBeginCaption();
+	}
+
+	/// <summary>
+	/// The action the primary button is actually about to take. Starting
+	/// a session, changing a running one, and dismissing an untouched
+	/// dialog are three different things, and the button says which.
+	/// </summary>
+	internal SessionChange PendingChange => _currentSession is null
+		? SessionChange.Fresh
+		: SessionChanges.Classify(_currentSession, BuildOptions(ValidatedWorkspacePath() ?? ""));
+
+	/// <summary>
+	/// Relabels the primary button for what it will do. Recomputed
+	/// whenever a control that feeds <see cref="BuildOptions"/> changes,
+	/// so the caption tracks the choices rather than the moment the
+	/// dialog opened.
+	/// </summary>
+	private void UpdateBeginCaption()
+	{
+		var (caption, hint) = PendingChange switch
+		{
+			SessionChange.Live => ("Apply Changes", "Apply these settings to the running session, which keeps its conversation"),
+			SessionChange.None => ("OK", "Save these settings and close. The running session is unchanged."),
+			_ => ("Begin Session", "Save these settings and start the session"),
+		};
+		buttonBeginSession.Content = caption;
+		buttonBeginSession.ToolTip = hint;
+	}
+
+	/// <summary>
+	/// The session options described by the controls as they stand.
+	/// </summary>
+	private ChatSessionOptions BuildOptions(string workspace)
+	{
+		var modelIndex = comboModel.SelectedIndex;
+		var hasModel = modelIndex >= 0 && modelIndex < _models.Count;
+		return new ChatSessionOptions
+		{
+			WorkspaceFolder = workspace,
+			Model = hasModel ? _models[modelIndex].Id : "",
+			ContextWindowTokens = hasModel ? _models[modelIndex].ContextWindowTokens : 0,
+			ReasoningEffort = comboEffort.SelectedItem as string ?? "",
+			Mode = comboMode.SelectedItem as string ?? "Standard",
+			UseByok = IsByok,
+			ByokEndpoint = IsByok && TryBuildEndpoint(out var endpoint, out _) ? endpoint : ByokEndpoint,
+			ByokApiKey = IsByok ? textBoxApiKey.Text.Trim() : "",
+			ApplyInstructions = checkApplyInstructions.IsChecked == true,
+			PreloadSkills = checkPreloadSkills.IsChecked == true,
+			LinkFiles = checkLinkFiles.IsChecked == true,
+		};
 	}
 
 	// -- Sibling dialogs ------------------------------------------------------
@@ -378,33 +454,22 @@ public partial class SettingsDialog : TurbolandFloatingDialog
 			return;
 		}
 
-		var modelIndex = comboModel.SelectedIndex;
-		var hasModel = modelIndex >= 0 && modelIndex < _models.Count;
-		var next = new ChatSessionOptions
-		{
-			WorkspaceFolder = workspace,
-			Model = hasModel ? _models[modelIndex].Id : "",
-			ContextWindowTokens = hasModel ? _models[modelIndex].ContextWindowTokens : 0,
-			ReasoningEffort = comboEffort.SelectedItem as string ?? "",
-			Mode = comboMode.SelectedItem as string ?? "Standard",
-			UseByok = IsByok,
-			ByokEndpoint = IsByok && TryBuildEndpoint(out var endpoint, out _) ? endpoint : ByokEndpoint,
-			ByokApiKey = textBoxApiKey.Text.Trim(),
-			ApplyInstructions = checkApplyInstructions.IsChecked == true,
-			PreloadSkills = checkPreloadSkills.IsChecked == true,
-			LinkFiles = checkLinkFiles.IsChecked == true,
-		};
+		var next = BuildOptions(workspace);
 
 		// Starting a session is a deliberate act, so it is confirmed rather
 		// than taken as a side effect of closing the settings. Declining
 		// leaves the dialog open and untouched: the choices stay editable and
-		// nothing has been persisted or connected.
+		// nothing has been persisted or connected. Closing a dialog that
+		// changes no session asks nothing, because there is nothing to agree to.
 		var change = _currentSession is null ? SessionChange.Fresh : SessionChanges.Classify(_currentSession, next);
-		var question = change == SessionChange.Live
-			? "Apply these changes to the current session? Its conversation continues."
-			: _sessionActive ? "Start a new session? The current session will end." : "Start a new session?";
-		if (!YesNoDialog.Ask(this, question, "Session"))
-			return;
+		if (change != SessionChange.None)
+		{
+			var question = change == SessionChange.Live
+				? "Apply these changes to the current session? Its conversation continues."
+				: _sessionActive ? "Start a new session? The current session will end." : "Start a new session?";
+			if (!YesNoDialog.Ask(this, question, "Session"))
+				return;
+		}
 
 		WorkspacePath = workspace;
 		Provider = IsByok ? "Byok" : "CopilotCli";
@@ -442,8 +507,13 @@ public partial class SettingsDialog : TurbolandFloatingDialog
 		var settings = Settings.Load();
 		settings.LastWorkspacePath = WorkspacePath;
 		settings.ModelProvider = Provider;
-		settings.ByokEndpoint = ByokEndpoint;
-		settings.ByokApiKey = ByokApiKey;
+		// The server address and key belong to the dialog, not to the
+		// session that happened to be started from it. Choosing the CLI
+		// this time must not erase the BYOK server configured last time,
+		// so what the fields hold is kept whichever provider won.
+		if (TryBuildEndpoint(out var endpoint, out _))
+			settings.ByokEndpoint = endpoint;
+		settings.ByokApiKey = textBoxApiKey.Text.Trim();
 		settings.SelectedModel = SelectedModel;
 		settings.SelectedEffort = SelectedEffort;
 		settings.SelectedMode = SelectedMode;

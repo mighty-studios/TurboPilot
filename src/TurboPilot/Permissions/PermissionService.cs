@@ -273,6 +273,59 @@ public static class PermissionService
 		return false;
 	}
 
+	// ------------------------------------------------------------------ snapshots
+
+	/// <summary>
+	/// The permissions actually in force for a workspace, flattened into
+	/// one scope: every folder grant that applied, defaults included, and
+	/// the operations that were pre-approved. Taken when a session
+	/// connects so the session can be resumed on the same terms.
+	/// </summary>
+	public static PermissionScope Snapshot(string? workspaceFolder) => new()
+	{
+		Folders = EffectiveEntries(workspaceFolder).Select(e => e.Clone()).ToList(),
+		Operations = [.. ApprovedOperations(workspaceFolder)],
+	};
+
+	/// <summary>
+	/// Gives a workspace back the permissions a snapshot recorded, as its
+	/// own scope. Returns false when the workspace already has them, so a
+	/// resume that changes nothing says nothing.
+	/// </summary>
+	public static bool Restore(string? workspaceFolder, PermissionScope? snapshot)
+	{
+		if (string.IsNullOrWhiteSpace(workspaceFolder) || snapshot is null)
+			return false;
+		// An empty snapshot is either a session saved before snapshots
+		// existed or one that genuinely had nothing; neither is worth
+		// revoking a live grant over.
+		if (snapshot.Folders.Count == 0 && (snapshot.Operations is null || snapshot.Operations.Count == 0))
+			return false;
+		if (Matches(workspaceFolder, snapshot))
+			return false;
+
+		SetEntries(workspaceFolder, snapshot.Folders);
+		SetOperations(workspaceFolder, snapshot.Operations ?? []);
+		return true;
+	}
+
+	private static bool Matches(string workspaceFolder, PermissionScope snapshot)
+	{
+		var folders = EffectiveEntries(workspaceFolder);
+		if (folders.Count != snapshot.Folders.Count)
+			return false;
+		for (var index = 0; index < folders.Count; index++)
+		{
+			if (!string.Equals(folders[index].FolderPath, snapshot.Folders[index].FolderPath, StringComparison.OrdinalIgnoreCase)
+				|| folders[index].Access != snapshot.Folders[index].Access)
+				return false;
+		}
+		var operations = ApprovedOperations(workspaceFolder);
+		var wanted = snapshot.Operations ?? [];
+		return operations.Count == wanted.Count
+			&& !operations.Except(wanted, StringComparer.OrdinalIgnoreCase).Any();
+	}
+
 	// ------------------------------------------------------------------ files
 
 	/// <summary>

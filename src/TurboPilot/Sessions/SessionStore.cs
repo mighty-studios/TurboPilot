@@ -3,6 +3,8 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using TurboPilot.Ai;
+using TurboPilot.Customizations;
+using TurboPilot.Permissions;
 using TurboPilot.Storage;
 
 namespace TurboPilot.Sessions;
@@ -28,12 +30,34 @@ public sealed class SessionRecord
 	public int ContextWindowTokens { get; set; }
 	public long AicNano { get; set; }
 	public bool UsesApiKey { get; set; }
+	/// <summary>
+	/// The customization items the session ran with, snapshotted when it
+	/// connected. A resume uses these rather than whatever the lists hold
+	/// now, so the session comes back with the instructions, skills,
+	/// agents and servers it actually had.
+	/// </summary>
+	public CustomizationLibrary Customizations { get; set; } = new();
+	/// <summary>
+	/// The permissions in force for the workspace when the session
+	/// connected: every folder grant that applied, and the operations
+	/// pre-approved. Restored with the session so a resume is not
+	/// silently more or less trusted than the run it continues.
+	/// </summary>
+	public PermissionScope Permissions { get; set; } = new();
 	public SummaryBootstrap? Bootstrap { get; set; }
 	public bool BootstrapPending { get; set; }
 
+	/// <summary>
+	/// The Past Sessions row: when the session last ran, the model it ran
+	/// on, and either its description or its ID. Model names and
+	/// descriptions both run long, so each is clipped to a fixed budget
+	/// and the row stays a predictable width.
+	/// </summary>
 	[JsonIgnore]
-	public string DisplayLabel => $"{UpdatedAt.ToLocalTime():g} | {Options.Model} | "
-		+ (string.IsNullOrWhiteSpace(Description) ? SessionId : Description);
+	public string DisplayLabel => $"{UpdatedAt.ToLocalTime():g} | {Rendering.ShortText.Model(Options.Model, 28)} | "
+		+ (string.IsNullOrWhiteSpace(Description)
+			? Rendering.ShortText.SessionId(SessionId, 24)
+			: Rendering.ShortText.Clip(Description, 72));
 }
 
 public sealed class SessionStore
