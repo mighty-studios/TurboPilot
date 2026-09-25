@@ -95,7 +95,8 @@ internal static class MediatorChecks
 		var models = await runtime.ListModelsAsync(timeout.Token);
 		Check.True(models.Count > 0, "The embedded runtime must return compatible text models.");
 		var preferred = models.FirstOrDefault(model => model.Alias == MediatorSettings.DefaultModelAlias);
-		Console.WriteLine($"PASS embedded catalog: {models.Count} compatible models; preferred model: {preferred?.DisplayLabel ?? "not available"}");
+		Console.WriteLine($"PASS embedded catalog: {models.Count} compatible models; preferred model: "
+			+ (preferred is null ? "not available" : $"{preferred.Name} ({preferred.Alias}) | {preferred.Device}{(preferred.Cached ? " | downloaded" : "")}"));
 		var model = preferred ?? throw new InvalidOperationException("The requested default model is not available.");
 		if (!model.Cached)
 		{

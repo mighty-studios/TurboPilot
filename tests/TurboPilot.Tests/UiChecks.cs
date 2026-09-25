@@ -520,12 +520,26 @@ internal static class UiChecks
 	private static void CheckMediatorDialog(MainWindow window, TestWorkspace workspace)
 	{
 		var configuration = new MediatorConfiguration(Path.Combine(workspace.Root, "mediator-dialog"));
-		var runtime = new FakeLocalRuntime();
+		var runtime = new FakeLocalRuntime
+		{
+			// Catalog names can be long enough to stretch a dialog sized to its content.
+			Models =
+			[
+				new(MediatorSettings.DefaultModelAlias, "Phi-3.5-mini-instruct-generic-cpu-with-an-exceptionally-long-catalog-name",
+					"CPU", 2590, true, 131072, "MIT"),
+				new("fixture-small", "Fixture Small", "GPU", 500, false, 8192, "MIT"),
+			],
+		};
 		var accepted = new MediatorDialog(configuration, runtime);
 		accepted.Loaded += (_, _) =>
 		{
-			var selected = Control<ComboBox>(accepted, "comboModel").SelectedItem as LocalModelDescriptor;
+			var combo = Control<ComboBox>(accepted, "comboModel");
+			var selected = combo.SelectedItem as LocalModelDescriptor;
 			Check.Equal(MediatorSettings.DefaultModelAlias, selected?.Alias, "Select the preferred compatible model");
+			Check.Equal(MediatorSettings.DefaultModelAlias, combo.SelectionBoxItem?.ToString(), "Show the model alias in the closed drop-down");
+			accepted.UpdateLayout();
+			Check.True(accepted.ActualWidth <= 960, $"Keep the Mediator dialog within 960 pixels: {accepted.ActualWidth:0}");
+			Check.True(Control<TextBlock>(accepted, "textModelDetails").Text.Contains("exceptionally-long-catalog-name"), "Show the full model name in the details.");
 			Control<CheckBox>(accepted, "checkEnabled").IsChecked = true;
 			Control<CheckBox>(accepted, "checkDebug").IsChecked = true;
 			Check.True(Control<Button>(accepted, "buttonOk").IsEnabled, "Allow enabling a downloaded model.");

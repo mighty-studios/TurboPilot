@@ -3,9 +3,8 @@ namespace TurboPilot.Mediation;
 public sealed record LocalModelDescriptor(
 	string Alias, string Name, string Device, int? SizeMb, bool Cached, long? ContextTokens, string? License)
 {
-	public string DisplayLabel => $"{Name} ({Alias}) | {Device}"
-		+ (SizeMb is { } size ? $" | {size} MB" : "")
-		+ (Cached ? " | downloaded" : " | download needed");
+	// Drop-downs show the alias; the closed box displays the selected item's text.
+	public override string ToString() => Alias;
 }
 
 public sealed record LocalRuntimeProgress(string Message, double? Percent = null);

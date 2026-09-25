@@ -2,13 +2,13 @@
 					xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
 					xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
 					xmlns:ctl="clr-namespace:TurbolandTheme.Wpf.Controls;assembly=TurbolandTheme.Wpf"
-					Title="MEDIATOR SETTINGS" MinWidth="760">
+					Title="MEDIATOR SETTINGS" MinWidth="760" MaxWidth="960">
 	<StackPanel Margin="10">
 		<CheckBox x:Name="checkEnabled" Content="Enable local Mediator"
 				Checked="OnOptionChanged" Unchecked="OnOptionChanged"/>
 		<GroupBox Header="On-device model" Margin="0,10,0,0">
 			<StackPanel>
-				<ComboBox x:Name="comboModel" DisplayMemberPath="DisplayLabel"
+				<ComboBox x:Name="comboModel" DisplayMemberPath="Alias"
 						SelectionChanged="OnModelChanged" MinWidth="710"/>
 				<TextBlock x:Name="textModelDetails" Margin="0,8,0,0" TextWrapping="Wrap" MaxWidth="710"/>
 				<StackPanel Orientation="Horizontal" Margin="0,10,0,0">

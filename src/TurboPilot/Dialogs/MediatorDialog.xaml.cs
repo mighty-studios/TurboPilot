@@ -92,7 +92,8 @@ public partial class MediatorDialog : TurbolandFloatingDialog
 	{
 		if (textModelDetails is null) return;
 		textModelDetails.Text = comboModel.SelectedItem is LocalModelDescriptor model
-			? $"{model.Device} | Context: {(model.ContextTokens is { } context ? context.ToString("N0") : "not reported")} tokens"
+			? $"{model.Name} | {model.Device}" + (model.SizeMb is { } size ? $" | {size} MB" : "")
+				+ $" | Context: {(model.ContextTokens is { } context ? context.ToString("N0") : "not reported")} tokens"
 				+ $" | License: {model.License ?? "see catalog"}\r\n"
 				+ (model.Cached ? "Downloaded and ready to load." : "Download this model before enabling the Mediator.")
 			: "Select a compatible model.";
