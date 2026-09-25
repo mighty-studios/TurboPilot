@@ -9,6 +9,7 @@ using TurboPilot.Ai;
 using TurboPilot.Customizations;
 using TurboPilot.Dialogs;
 using TurboPilot.Sessions;
+using TurboPilot.Tools;
 
 namespace TurboPilot;
 
@@ -43,6 +44,10 @@ public partial class MainWindow : TurbolandWindow
 	private readonly Func<ChatService> _createChat;
 	private readonly Func<string?, CustomizationLibrary> _collectCustomizations;
 	private readonly string _webViewDataFolder;
+
+	// The helper functions dotted into a Tools shell. Null uses the
+	// per-user file; tests point it somewhere disposable.
+	private readonly string? _scriptsPath;
 	private readonly SemaphoreSlim _sessionChange = new(1, 1);
 	private readonly HashSet<string> _historySessions = [];
 	private CancellationTokenSource? _startCancellation;
@@ -71,11 +76,13 @@ public partial class MainWindow : TurbolandWindow
 	}
 
 	internal MainWindow(SessionStore sessionStore, Func<ChatService>? createChat = null,
-		Func<string?, CustomizationLibrary>? collectCustomizations = null, string? webViewDataFolder = null)
+		Func<string?, CustomizationLibrary>? collectCustomizations = null, string? webViewDataFolder = null,
+		string? scriptsPath = null)
 	{
 		_sessionStore = sessionStore;
 		_createChat = createChat ?? (() => new ChatService(_sessionStore));
 		_collectCustomizations = collectCustomizations ?? CustomizationService.Rescan;
+		_scriptsPath = scriptsPath;
 		_webViewDataFolder = webViewDataFolder ?? System.IO.Path.Combine(
 			Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TurboPilot", "webview2-default");
 		InitializeComponent();
@@ -1156,6 +1163,45 @@ public partial class MainWindow : TurbolandWindow
 	{
 		new Dialogs.PermissionsDialog(ActiveWorkspacePath).ShowDialog(this);
 	}
+
+	// -- Tools -----------------------------------------------------------------
+
+	/// <summary>
+	/// The Tools menu opens an external program on the session's workspace
+	/// folder. The menu is disabled without a session, so a missing
+	/// workspace here means the folder was removed while the session ran.
+	/// Each program is separate from the app: it is started and left alone,
+	/// and a failure to start it is reported without disturbing the session.
+	/// </summary>
+	private void OpenTool(string name, Func<string, System.Diagnostics.ProcessStartInfo> build)
+	{
+		var workspace = ActiveWorkspacePath;
+		if (string.IsNullOrEmpty(workspace) || !System.IO.Directory.Exists(workspace))
+		{
+			MessageDialog.Ok(this, "The session workspace folder is not available.", name);
+			return;
+		}
+		try { ExternalTools.Start(build(workspace)); }
+		catch (Exception ex)
+		{
+			MessageDialog.Ok(this, $"Could not open {name}: {ex.Message}", name);
+		}
+	}
+
+	private void OnOpenPowerShell(object sender, RoutedEventArgs e)
+	{
+		string? scripts = null;
+		// A helper file that cannot be written still leaves a usable shell.
+		try { scripts = ExternalTools.EnsureScripts(_scriptsPath); }
+		catch (InvalidOperationException ex) { ShowNotice(ex.Message); }
+		OpenTool("PowerShell", workspace => ExternalTools.BuildPowerShell(workspace, scripts));
+	}
+
+	private void OnOpenExplorer(object sender, RoutedEventArgs e) =>
+		OpenTool("Explorer", ExternalTools.BuildExplorer);
+
+	private void OnOpenVsCode(object sender, RoutedEventArgs e) =>
+		OpenTool("VS Code", ExternalTools.BuildVsCode);
 
 	private void ShowNotice(string text)
 	{

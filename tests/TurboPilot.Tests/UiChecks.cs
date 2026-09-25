@@ -180,7 +180,8 @@ internal static class UiChecks
 		await using var provider = new LocalProvider();
 		var library = workspace.CreateLibrary();
 		TurbolandTheme.Wpf.TurbolandTheme.Apply(application, TurbolandTheme.Core.ThemeMode.Authentic);
-		var window = new MainWindow(workspace.Store, workspace.CreateChat, _ => library, Path.Combine(workspace.Root, "browser"));
+		var window = new MainWindow(workspace.Store, workspace.CreateChat, _ => library, Path.Combine(workspace.Root, "browser"),
+			workspace.ScriptsPath);
 		TurbolandTheme.Wpf.TurbolandTheme.ApplyTo(window);
 		var options = new ChatSessionOptions
 		{
@@ -195,6 +196,7 @@ internal static class UiChecks
 		{
 			Check.True(!window.IsSessionActive, "Start without an active session.");
 			Check.True(!Control<Button>(window, "buttonSend").IsEnabled, "Disable Send before startup.");
+			Check.True(!Control<MenuItem>(window, "menuTools").IsEnabled, "Offer no tools without a workspace to open them on.");
 			Check.Equal("Start or resume a session to begin.", Status(window), "Initial status");
 			window.Show();
 			await Check.UntilAsync(() => Field<bool>(window, "_webViewReady"), "The rendered output did not initialize.");
@@ -207,6 +209,7 @@ internal static class UiChecks
 			Check.True(window.IsSessionActive && Status(window).StartsWith("Ready.."), "Enable a fully started session.");
 			Check.True(Control<Button>(window, "buttonSend").IsEnabled, "Enable Send after startup.");
 			Check.True(!Status(window).Contains("AiC="), "Do not show cloud credits for a local provider.");
+			CheckTools(application, window, workspace);
 
 			var reply = new LocalProvider.Reply("**UI streaming reply**\n\n```mermaid\ngraph TD\nA[Input] --> B[Output]\n```");
 			provider.Replies.Enqueue(reply);
@@ -389,6 +392,33 @@ internal static class UiChecks
 		Check.True(!window.IsSessionActive, "End during hand-off preparation must cancel the pending restart.");
 		Console.WriteLine("PASS UI Rendered links, live session changes, hand-off restart consent, and cancellation");
 	}
+	/// <summary>
+	/// The Tools menu. Each item opens a separate program, so the check
+	/// stops at the point of launch: it aims the window at a folder that
+	/// does not exist, which makes every handler report instead of
+	/// starting anything, and confirms the PowerShell item still
+	/// provisions the helper functions on its way there.
+	/// </summary>
+	private static void CheckTools(Application application, MainWindow window, TestWorkspace workspace)
+	{
+		Check.True(Control<MenuItem>(window, "menuTools").IsEnabled, "Offer the tools of a running session.");
+		var restore = window.ActiveWorkspacePath;
+		SetProperty(window, "ActiveWorkspacePath", Path.Combine(workspace.Root, "removed-workspace"));
+		try
+		{
+			foreach (var item in new[] { "menuOpenPowershell", "menuOpenExplorer", "menuOpenVsCode" })
+			{
+				var reported = false;
+				using (DialogAction<MessageDialog>(application, dialog => { reported = true; dialog.Close(); }))
+					Control<MenuItem>(window, item).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+				Check.True(reported, $"{item} must report a workspace folder that is no longer there.");
+			}
+		}
+		finally { SetProperty(window, "ActiveWorkspacePath", restore); }
+		Check.True(File.Exists(workspace.ScriptsPath), "Open Powershell must provision the helper functions.");
+		Console.WriteLine("PASS Tools menu availability, workspace guard, and helper provisioning");
+	}
+
 	private static IDisposable DialogAction<T>(Application application, Action<T> action) where T : Window
 	{
 		var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(25) };
@@ -547,6 +577,10 @@ internal static class UiChecks
 
 	private static void SetField(object owner, string name, object value) =>
 		owner.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(owner, value);
+
+	private static void SetProperty(object owner, string name, object? value) =>
+		owner.GetType().GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!
+			.GetSetMethod(nonPublic: true)!.Invoke(owner, [value]);
 
 	private static object? Invoke(object owner, string name, params object?[] arguments) =>
 		owner.GetType().GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(owner, arguments);

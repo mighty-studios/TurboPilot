@@ -18,6 +18,16 @@ The status line shows `Starting..`, `Ready..`, `Working..`, or `Waiting..`, foll
 
 With **Link Files in Rendered Output** checked in Session Settings (the default), each completed reply is prepared for Rendered without any model: file references that resolve to a readable file become links, and referenced images get inline previews. References resolve against the workspace; a bare file name or partial path such as `MainWindow.xaml` links when exactly one workspace file matches, skipping build and tool folders such as `bin`, `obj`, and `.git`. Code blocks, inline code that is not a path, existing links, and URLs are left as written, and Raw is unchanged.
 
+## Tools
+
+The **Tools** menu opens an external program on the workspace folder of the running session. It is disabled until a session starts.
+
+- **Open Powershell** opens a shell in the workspace with your helper functions loaded. PowerShell 7 (`pwsh.exe`) is used when it is on `PATH`, falling back to Windows PowerShell. The helper file is `%LOCALAPPDATA%\TurboPilot\scripts\scripts.ps1`, created from bundled defaults if missing and never overwritten when it exists; delete it to restore the defaults. It is dotted into the shell, so its functions stay defined for that window. Deleting it leaves a plain shell rather than blocking the tool.
+- **Open Explorer** opens a File Explorer window on the workspace.
+- **Open VSCode** opens Visual Studio Code on the workspace, using the `code` launcher on `PATH` (VS Code -> Command Palette -> "Install 'code' command in PATH").
+
+Each program runs on its own. TurboPilot neither waits for it nor closes it, and a program it cannot start is reported without interrupting the session.
+
 ## Changing a running session
 
 **Session -> Settings** also changes a running session. The model, reasoning effort, Standard/Plan/Autopilot mode, and file-link setting apply to the running session, which keeps its conversation. Changes requested during a turn wait until that turn ends, or apply just before your next prompt if you interrupt it; choosing the running settings again withdraws a waiting change. Other changes start a new session: the service, endpoint, or key; instruction or skill loading; a custom agent mode; or a different context window for a BYOK model.

@@ -12,6 +12,7 @@ internal sealed class TestWorkspace : IDisposable
 	public string Workspace => Path.Combine(Root, "workspace");
 	public string HistoryDirectory => Path.Combine(Root, "history");
 	public string ApplicationInstructionsPath => Path.Combine(Root, "instructions", ApplicationInstructions.FileName);
+	public string ScriptsPath => Path.Combine(Root, "scripts", "scripts.ps1");
 	public SessionStore Store { get; }
 
 	public TestWorkspace()

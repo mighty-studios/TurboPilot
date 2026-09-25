@@ -73,9 +73,9 @@
                 <MenuItem Header="E_xit" Click="OnExitClick"/>
             </MenuItem>
             <MenuItem x:Name="menuTools" Header="_Tools">
-                <MenuItem Header="Open _Powershell"/>
-                <MenuItem Header="Open _Explorer"/>
-                <MenuItem Header="Open _VSCode"/>
+                <MenuItem x:Name="menuOpenPowershell" Header="Open _Powershell" Click="OnOpenPowerShell"/>
+                <MenuItem x:Name="menuOpenExplorer" Header="Open _Explorer" Click="OnOpenExplorer"/>
+                <MenuItem x:Name="menuOpenVsCode" Header="Open _VSCode" Click="OnOpenVsCode"/>
             </MenuItem>
             <MenuItem Header="_Help">
                 <MenuItem Header="_About..." Click="OnAbout"/>

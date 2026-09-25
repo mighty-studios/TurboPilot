@@ -5,6 +5,7 @@ using TurboPilot.Ai;
 using TurboPilot.Customizations;
 using TurboPilot.Dialogs;
 using TurboPilot.Sessions;
+using TurboPilot.Tools;
 
 namespace TurboPilot.Tests;
 
@@ -14,11 +15,12 @@ internal static class CoreChecks
 	{
 		CheckConfiguration();
 		CheckApplicationInstructions();
+		CheckExternalTools();
 		CheckStorage();
 		await CheckQuestionsAsync();
 		await CheckEventsAsync();
 		CheckHistoryAndStatus();
-		Console.WriteLine("PASS configuration, history storage, questions, streaming events, usage, and prompt navigation");
+		Console.WriteLine("PASS configuration, history storage, questions, streaming events, usage, prompt navigation, and external tools");
 	}
 
 	private static void CheckConfiguration()
@@ -116,6 +118,43 @@ internal static class CoreChecks
 		File.Delete(path);
 		SessionConfiguration.Apply(config, options, path);
 		Check.True(initial.SequenceEqual(File.ReadAllBytes(path)), "Recreate missing defaults.");
+	}
+
+	private static void CheckExternalTools()
+	{
+		using var workspace = new TestWorkspace();
+		var path = workspace.ScriptsPath;
+		var scripts = ExternalTools.EnsureScripts(path);
+		Check.Equal(path, scripts, "Use the supplied helper path");
+		var initial = File.ReadAllBytes(path);
+		Check.True(Encoding.UTF8.GetString(initial).Contains("function current_root"), "Provision the bundled helper functions.");
+		File.WriteAllText(path, "function fixture_helper {}");
+		ExternalTools.EnsureScripts(path);
+		Check.Equal("function fixture_helper {}", File.ReadAllText(path), "Never overwrite an edited helper file");
+		File.Delete(path);
+		ExternalTools.EnsureScripts(path);
+		Check.True(initial.SequenceEqual(File.ReadAllBytes(path)), "Recreate a deleted helper file from the defaults.");
+
+		var quoted = Path.Combine(workspace.Root, "scripts", "o'brien.ps1");
+		File.Copy(path, quoted);
+		var shell = ExternalTools.BuildPowerShell(workspace.Workspace, quoted);
+		Check.Equal($"-NoExit -Command \". '{quoted.Replace("'", "''")}'\"", shell.Arguments, "Dot the helper file, escaping quotes");
+		Check.Equal(workspace.Workspace, shell.WorkingDirectory, "Open the shell in the workspace");
+		Check.True(shell.UseShellExecute, "Let the shell own its own window.");
+		Check.True(shell.FileName.EndsWith("pwsh.exe", StringComparison.OrdinalIgnoreCase)
+			|| shell.FileName == "powershell.exe", "Prefer PowerShell 7 and fall back to Windows PowerShell.");
+		Check.Equal("-NoExit", ExternalTools.BuildPowerShell(workspace.Workspace, null).Arguments,
+			"Open a plain shell when there are no helper functions");
+		Check.Equal("-NoExit", ExternalTools.BuildPowerShell(workspace.Workspace, Path.Combine(workspace.Root, "gone.ps1")).Arguments,
+			"Open a plain shell when the helper file is missing");
+
+		var explorer = ExternalTools.BuildExplorer(workspace.Workspace);
+		Check.Equal("explorer.exe", explorer.FileName, "Open File Explorer");
+		Check.Equal($"\"{workspace.Workspace}\"", explorer.Arguments, "Open Explorer on the workspace");
+		var editor = ExternalTools.BuildVsCode(workspace.Workspace);
+		Check.Equal("code", editor.FileName, "Resolve the VS Code launcher on PATH");
+		Check.Equal($"\"{workspace.Workspace}\"", editor.Arguments, "Open VS Code on the workspace");
+		Check.True(editor.UseShellExecute, "A PATH shim needs the shell to resolve it.");
 	}
 
 	private static void CheckStorage()
