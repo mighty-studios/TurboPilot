@@ -4,6 +4,7 @@ using GitHub.Copilot;
 using TurboPilot.Permissions;
 using TurboPilot.Rendering;
 using TurboPilot.Sessions;
+using TurboPilot.Tools;
 using System.Text.Json;
 
 namespace TurboPilot.Ai;
@@ -42,6 +43,8 @@ public sealed class ChatService : IAsyncDisposable
 	private WorkspaceFileIndex? _fileIndex;
 	private Task _formattingTail = Task.CompletedTask;
 	private ChatSessionOptions? _pendingChanges;
+	// Injected by checks so the update notice can be exercised offline.
+	internal Func<CancellationToken, Task<string?>>? _cliVersionLookup;
 	private const int HandoffRecentRequests = 4;
 	private const int HandoffRequestChars = 2000;
 
@@ -636,6 +639,9 @@ public sealed class ChatService : IAsyncDisposable
 					case ToolExecutionStartEvent tool:
 						AddNotice(NoticeFormatter.Status("tool", tool.Data.ToolName));
 						break;
+					case SessionStartEvent start when !_options.UseByok:
+						CheckCliVersion(start.Data.CopilotVersion);
+						break;
 					case SessionMcpServerStatusChangedEvent server:
 						ReportServerStatus(server.Data.ServerName, server.Data.Status.Value, server.Data.Error);
 						break;
@@ -708,6 +714,25 @@ public sealed class ChatService : IAsyncDisposable
 			rendered is null ? null : "\r\n\r\n" + rendered + "\r\n\r\n");
 
 	private void AddNotice((string Text, string Rendered) notice) => AddNotice(notice.Text, notice.Rendered);
+
+	/// <summary>
+	/// Looks up the latest Copilot CLI release off the event thread and
+	/// writes one line if the running CLI is behind. BYOK sessions never
+	/// reach here: they do not use the CLI, so its version is not their
+	/// problem. Failures are silent by design.
+	/// </summary>
+	private void CheckCliVersion(string? version) => _ = Task.Run(async () =>
+	{
+		try
+		{
+			if (await CliUpdate.CheckAsync(version, _cliVersionLookup, _lifetime.Token) is { } notice)
+				AddNotice(NoticeFormatter.Status("update", notice));
+		}
+		catch (Exception)
+		{
+			// An update notice is a courtesy; it never reports its own failure.
+		}
+	});
 
 	private void ReportServerStatus(string name, string status, string? error)
 	{

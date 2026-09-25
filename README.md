@@ -14,6 +14,16 @@ The **Raw** tab preserves streamed conversation text. **Rendered** supports mark
 
 The status line shows `Starting..`, `Ready..`, `Working..`, or `Waiting..`, followed by context usage in whole Ki tokens. Cloud sessions also display whole AI Credits as `AiC=<value>`. Long model IDs and session IDs are shortened to keep the status line and the Past Sessions list at a readable width; hover either to see the full value.
 
+## Keeping the CLI current
+
+A session backed by the Copilot CLI checks once per run whether a newer CLI has been released, and writes one transcript line when there is:
+
+```
+[update] Copilot CLI v1.0.37 -> v1.0.41 available. Open a Copilot terminal and run /update
+```
+
+Nothing is said when the CLI is current, when the check cannot reach GitHub, or when the session uses BYOK. The check never blocks startup.
+
 ## Managing context
 
 **Session -> Compact Context** asks the session to summarize its own history, freeing the space that history occupied while keeping what the conversation established. **Session -> Reset Context** goes further and starts the session over with an empty history on the same settings. Both confirm first, both interrupt a running turn, and both leave the on-screen transcript intact: what you see is unchanged, only what the model still remembers is reduced. Neither is available until a session is ready.

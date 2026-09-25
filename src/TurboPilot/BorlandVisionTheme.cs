@@ -300,6 +300,8 @@ public static class BorlandVisionTheme
 			Semantic.Warning),
 		new(".kp-status-permissions .kp-status-tag, .kp-status-permissions .kp-status-text", "Permissions restored with a session",
 			Semantic.Info),
+		new(".kp-status-update .kp-status-tag, .kp-status-update .kp-status-text", "An available tool update",
+			Semantic.Accent),
 		new(".kp-banner", "Session banner",
 			Palette.LightGray, Palette.DeepBlue),
 
