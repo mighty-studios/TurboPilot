@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -13,6 +14,16 @@ public sealed class MediatorService : IMediatorSession
 		RespectNullableAnnotations = true,
 		UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
 	};
+	// Local requests are never embedded in markup, so apostrophes and non-ASCII text stay readable
+	// instead of reaching a small model as \u0027 escapes.
+	private static readonly JsonSerializerOptions InputOptions = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+	// Catalogs can advertise 128K windows, but on-device evaluation of that much text cannot finish
+	// within a call timeout. Larger inputs are trimmed or skipped instead of timing out.
+	private const int PracticalContextTokens = 4096;
+	private const int EvidenceItems = 3;
+	private const int EvidenceChars = 600;
+	private const int PromptExcerptChars = 2000;
+	private const int SummaryChunkTokens = 400;
 	private readonly ILocalModelRuntime _runtime;
 	private readonly MediatorConfiguration _configuration;
 	private readonly MediationStore _store;
@@ -26,7 +37,7 @@ public sealed class MediatorService : IMediatorSession
 	private int _failures;
 	private bool _offline;
 	private bool _disabled;
-	private int _contextTokens = 4096;
+	private int _contextTokens = PracticalContextTokens;
 	private bool _catalogRead;
 	private string _status = "Mediator off";
 	private volatile bool _busy;
@@ -77,15 +88,17 @@ public sealed class MediatorService : IMediatorSession
 			return true;
 		}, cancellationToken);
 
-	public void Capture(string role, string content, bool interrupted = false)
+	public long Capture(string role, string content, bool interrupted = false)
 	{
 		lock (_stateLock)
 		{
+			var sequence = _state.Entries.Count + 1;
 			_state.Entries.Add(new MediationEntry
 			{
-				Sequence = _state.Entries.Count + 1, Role = role, Content = content, Interrupted = interrupted,
+				Sequence = sequence, Role = role, Content = content, Interrupted = interrupted,
 			});
 			SaveState();
+			return sequence;
 		}
 	}
 
@@ -100,48 +113,59 @@ public sealed class MediatorService : IMediatorSession
 		}, cancellationToken);
 	}
 
-	public Task<PromptPreparation> PreparePromptAsync(string prompt, IReadOnlyList<string>? attachments = null,
-		CancellationToken cancellationToken = default) => WithGateAsync(async token =>
+	public bool ShouldRewrite(string prompt) => CanRewrite(prompt, MediationText.CountTokens(prompt));
+
+	private bool CanRewrite(string prompt, int tokens) =>
+		CanRun && _settings.RewordPrompts && !string.IsNullOrWhiteSpace(prompt) && tokens >= _settings.MinimumRewriteTokens;
+
+	public async Task<PromptPreparation> PreparePromptAsync(string prompt, IReadOnlyList<string>? attachments = null,
+		CancellationToken cancellationToken = default)
 	{
 		var originalTokens = MediationText.CountTokens(prompt);
 		var original = new PromptPreparation(prompt, originalTokens, originalTokens, false);
-		if (!CanRun || !_settings.RewordPrompts || string.IsNullOrWhiteSpace(prompt))
+		if (!CanRewrite(prompt, originalTokens))
 			return original;
-		var input = JsonSerializer.Serialize(new
+		return await WithGateAsync(async token =>
 		{
-			prompt, protectedText = MediationText.GetProtectedText(prompt),
-			summary = CurrentSummary ?? "", attachments = attachments ?? [],
-		});
-		var response = await RunAsync(MediatorOperation.RewritePrompt, input, 1200, raw =>
-		{
-			var result = Parse<RewriteResponse>(raw);
-			if (string.IsNullOrWhiteSpace(result.Prompt))
-				throw new InvalidDataException("The rewritten prompt was empty.");
-			return result;
-		}, token).ConfigureAwait(false);
-		if (response is null)
-			return original;
-		var rewritten = response.Prompt.Trim();
-		var preparedTokens = MediationText.CountTokens(rewritten);
-		if (!response.MeaningPreserved || preparedTokens >= originalTokens || !MediationText.PreservesLiterals(prompt, rewritten))
-		{
-			DiagnosticReceived?.Invoke(new(MediatorOperation.RewritePrompt, input, rewritten, "Original retained: reduction or literal-preservation checks did not pass."));
-			return original;
-		}
-		return new PromptPreparation(rewritten, originalTokens, preparedTokens, true);
-	}, cancellationToken);
+			// Only the prompt and attachment names are supplied: background context and folder names
+			// invite a small model to add details the user never wrote.
+			var input = JsonSerializer.Serialize(new
+			{
+				prompt, protectedText = MediationText.GetProtectedText(prompt),
+				attachments = (attachments ?? []).Select(Path.GetFileName).ToArray(),
+			}, InputOptions);
+			var response = await RunAsync(MediatorOperation.RewritePrompt, FirstFitting(input), 1200, raw =>
+			{
+				var result = Parse<RewriteResponse>(raw);
+				if (string.IsNullOrWhiteSpace(result.Prompt))
+					throw new InvalidDataException("The rewritten prompt was empty.");
+				return result;
+			}, token).ConfigureAwait(false);
+			if (response is null)
+				return original;
+			var rewritten = response.Prompt.Trim();
+			var preparedTokens = MediationText.CountTokens(rewritten);
+			if (!response.MeaningPreserved || preparedTokens >= originalTokens || !MediationText.PreservesLiterals(prompt, rewritten))
+			{
+				DiagnosticReceived?.Invoke(new(MediatorOperation.RewritePrompt, input, rewritten, "Original retained: reduction or literal-preservation checks did not pass."));
+				return original;
+			}
+			return new PromptPreparation(rewritten, originalTokens, preparedTokens, true);
+		}, cancellationToken).ConfigureAwait(false);
+	}
 
-	public Task<OutputPreparation> PrepareOutputAsync(string output, CancellationToken cancellationToken = default) =>
-		WithGateAsync(async token =>
+	public Task<OutputPreparation> PrepareOutputAsync(string output, long? responseSequence = null,
+		CancellationToken cancellationToken = default) => WithGateAsync(async token =>
 		{
 			if (!_settings.Enabled)
 				return new OutputPreparation(output, []);
 			var warnings = _settings.MonitorOutput ? MediationText.FindRepetition(output).ToList() : [];
-			var rendered = output;
-			if (_settings.BeautifyOutput && CanRun)
+			var suggestions = new FormatSuggestions([], []);
+			// File links need no model, so it is consulted only when a plain standalone line could become a heading.
+			if (_settings.BeautifyOutput && CanRun && OutputFormatter.HasHeadingCandidate(output))
 			{
-				var input = JsonSerializer.Serialize(new { response = output });
-				var response = await RunAsync(MediatorOperation.BeautifyOutput, input, 1200, raw =>
+				var input = JsonSerializer.Serialize(new { response = output }, InputOptions);
+				var response = await RunAsync(MediatorOperation.BeautifyOutput, FirstFitting(input), 1200, raw =>
 				{
 					var result = Parse<FormattingResponse>(raw);
 					if (result.Links.Any(link => link is null || link.Text is null || link.Path is null)
@@ -150,37 +174,74 @@ public sealed class MediatorService : IMediatorSession
 					return result;
 				}, token).ConfigureAwait(false);
 				if (response is not null)
-					rendered = OutputFormatter.Apply(output, new(response.Links, response.Headings), _state.Workspace,
-						message => NoticeReceived?.Invoke(message));
+					suggestions = new(response.Links, response.Headings);
 			}
+			// Validated file links do not depend on the local model, so they survive its failures.
+			var rendered = _settings.BeautifyOutput ? Format(output, suggestions) : output;
 			if (_settings.MonitorOutput && CanRun)
 			{
-				string prompt;
-				MediationEntry[] evidence;
-				lock (_stateLock)
-				{
-					prompt = _state.Entries.LastOrDefault(entry => entry.Role == "user")?.Content ?? "";
-					evidence = _state.Entries.Where(entry => entry.Role == "tool").TakeLast(5).ToArray();
-				}
-				var input = JsonSerializer.Serialize(new { prompt, response = output, summary = CurrentSummary ?? "", evidence });
-				var response = await RunAsync(MediatorOperation.MonitorOutput, input, 700, raw =>
+				var response = await RunAsync(MediatorOperation.MonitorOutput, FirstFitting(MonitorInputs(output, responseSequence)), 700, raw =>
 				{
 					var result = Parse<MonitoringResponse>(raw);
-					if (result.Warnings.Any(warning => warning is null || warning.Kind is not ("repetition" or "contradiction" or "unsupported-claim")
-						|| string.IsNullOrWhiteSpace(warning.Quote) || !output.Contains(warning.Quote, StringComparison.Ordinal)
-						|| string.IsNullOrWhiteSpace(warning.Message)))
-						throw new InvalidDataException("A monitoring warning lacked a supported kind or an exact response excerpt.");
+					if (result.Warnings.Any(warning => warning is null))
+						throw new InvalidDataException("The monitoring response contained an empty warning.");
 					return result;
 				}, token).ConfigureAwait(false);
 				if (response is not null)
-					warnings.AddRange(response.Warnings.Take(3).Select(warning => warning with
+				{
+					// Ungrounded warnings are discarded rather than corrected: a correction rarely grounds them,
+					// and an imprecise answer is not a local failure.
+					var grounded = response.Warnings.Where(warning => warning.Kind is "repetition" or "contradiction" or "unsupported-claim"
+						&& !string.IsNullOrWhiteSpace(warning.Message) && !string.IsNullOrWhiteSpace(warning.Quote)
+						&& output.Contains(warning.Quote, StringComparison.Ordinal)).ToList();
+					if (grounded.Count < response.Warnings.Count)
+						DiagnosticReceived?.Invoke(new(MediatorOperation.MonitorOutput, "", "",
+							$"Discarded {response.Warnings.Count - grounded.Count} warning(s) without a supported kind and an exact response excerpt."));
+					warnings.AddRange(grounded.Take(3).Select(warning => warning with
 					{
 						Message = warning.Message.Length > 240 ? warning.Message[..240] : warning.Message,
 						Quote = warning.Quote.Length > 180 ? warning.Quote[..180] : warning.Quote,
 					}));
+				}
 			}
 			return new OutputPreparation(rendered, warnings.DistinctBy(warning => warning.Quote).Take(3).ToList());
 		}, cancellationToken);
+
+	public OutputPreparation FormatOutput(string output)
+	{
+		var settings = _settings;
+		if (!settings.Enabled)
+			return new OutputPreparation(output, []);
+		return new OutputPreparation(
+			settings.BeautifyOutput ? Format(output, new FormatSuggestions([], [])) : output,
+			settings.MonitorOutput ? MediationText.FindRepetition(output) : []);
+	}
+
+	private string Format(string output, FormatSuggestions suggestions) =>
+		OutputFormatter.Apply(output, suggestions, _state.Workspace, message => NoticeReceived?.Invoke(message));
+
+	// Candidates in order of preference: the summary and then the tool evidence are dropped
+	// when the response itself needs the room. Context comes from the exchange that produced the
+	// response, even when a newer prompt was recorded while this preparation waited in the queue.
+	private string[] MonitorInputs(string output, long? responseSequence)
+	{
+		string prompt, summary;
+		string[] evidence;
+		lock (_stateLock)
+		{
+			var prior = _state.Entries.Take(responseSequence is { } sequence ? (int)Math.Clamp(sequence - 1, 0, _state.Entries.Count)
+				: _state.Entries.Count).ToList();
+			var request = prior.FindLastIndex(entry => entry.Role == "user");
+			prompt = request >= 0 ? prior[request].Content : "";
+			summary = _state.Summary;
+			evidence = prior.Skip(request + 1).Where(entry => entry.Role == "tool").TakeLast(EvidenceItems)
+				.Select(entry => MediationText.Excerpt(entry.Content, EvidenceChars)).ToArray();
+		}
+		prompt = MediationText.Excerpt(prompt, PromptExcerptChars);
+		string Serialize(string background, string[] items) => JsonSerializer.Serialize(
+			new { prompt, response = output, summary = background, evidence = items }, InputOptions);
+		return new[] { Serialize(summary, evidence), Serialize("", evidence), Serialize("", []) }.Distinct().ToArray();
+	}
 
 	public Task<string?> GetSummaryAsync(CancellationToken cancellationToken = default) => WithGateAsync(async token =>
 	{
@@ -201,38 +262,112 @@ public sealed class MediatorService : IMediatorSession
 			summary = _state.Summary;
 			pending = _state.Entries.Where(entry => entry.Sequence > _state.SummaryThrough).ToArray();
 		}
-		foreach (var entry in pending)
+		// Tool output stays in the worklog as monitoring evidence; assistant messages report its outcome.
+		// Entries are cut into small chunks and packed by serialized size, so every request fits and
+		// pending entries share as few calls as possible: each rewrite of the summary can drop a detail.
+		var items = new List<SummaryItem>();
+		foreach (var entry in pending.Where(entry => entry.Role != "tool" && !string.IsNullOrWhiteSpace(entry.Content)))
 		{
-			foreach (var chunk in MediationText.SplitForContext(entry.Content, Math.Max(256, Math.Min(1200, _contextTokens / 3))))
+			var chunks = MediationText.SplitForContext(entry.Content, SummaryChunkTokens);
+			for (var index = 0; index < chunks.Count; index++)
+				items.Add(new(entry.Sequence, index == chunks.Count - 1, entry.Role, chunks[index], entry.Interrupted));
+		}
+		var start = 0;
+		while (start < items.Count)
+		{
+			var used = 0;
+			var unfit = false;
+			var previous = summary;
+			var result = await RunAsync(MediatorOperation.UpdateSummary, room =>
 			{
-				var input = JsonSerializer.Serialize(new
-				{
-					previousSummary = summary,
-					entries = new[] { new { entry.Role, Content = chunk, entry.Interrupted } },
-				});
-				var result = await RunAsync(MediatorOperation.UpdateSummary, input, 900, raw =>
-				{
-					var response = Parse<SummaryResponse>(raw);
-					if (string.IsNullOrWhiteSpace(response.Summary) || MediationText.CountTokens(response.Summary) > 900)
-						throw new InvalidDataException("The summary was empty or exceeded its one-page limit.");
-					return response;
-				}, cancellationToken).ConfigureAwait(false);
-				if (result is null) return;
-				summary = result.Summary.Trim();
-			}
-			lock (_stateLock)
+				used = FitSummaryBatch(previous, items, start, room, out var input);
+				unfit = used == 0;
+				return input;
+			}, 900, raw =>
 			{
-				_state.Summary = summary;
-				_state.SummaryThrough = entry.Sequence;
-				_state.SummaryUpdatedAt = DateTimeOffset.UtcNow;
-				SaveState();
+				var response = Parse<SummaryResponse>(raw);
+				if (string.IsNullOrWhiteSpace(response.Summary) || MediationText.CountTokens(response.Summary) > 900)
+					throw new InvalidDataException("The summary was empty or exceeded its one-page limit.");
+				return response;
+			}, cancellationToken).ConfigureAwait(false);
+			if (result is null)
+			{
+				if (unfit)
+					NoticeReceived?.Invoke("The summary cannot be updated: the Mediator instructions leave too little room for conversation text.");
+				return;
 			}
+			summary = result.Summary.Trim();
+			start += used;
+			// Progress is durable only where a batch ended on an entry boundary.
+			if (items[start - 1].EndsEntry)
+				CommitSummary(summary, start < items.Count ? items[start].Sequence - 1 : pending[^1].Sequence);
+		}
+		if (items.Count == 0)
+			CommitSummary(summary, pending[^1].Sequence);
+	}
+
+	// Packs as many chunks as fit: per-chunk estimates first, then an exact count of the whole request.
+	private static int FitSummaryBatch(string summary, List<SummaryItem> items, int start, int room, out string? input)
+	{
+		string Serialize(int count) => JsonSerializer.Serialize(new
+		{
+			previousSummary = summary, entries = SummaryEntries(items, start, count),
+		}, InputOptions);
+		var estimate = MediationText.CountTokens(Serialize(0));
+		var count = 0;
+		while (start + count < items.Count)
+		{
+			var cost = MediationText.CountTokens(JsonSerializer.Serialize(SummaryEntries(items, start + count, 1)[0], InputOptions)) + 1;
+			if (estimate + cost > room)
+				break;
+			estimate += cost;
+			count++;
+		}
+		for (; count > 0; count--)
+		{
+			input = Serialize(count);
+			if (MediationText.CountTokens(input) <= room)
+				return count;
+		}
+		input = null;
+		return 0;
+	}
+
+	// Chunks of one entry that share a request are rejoined, so an entry appears split only where a request ends.
+	private static List<object> SummaryEntries(List<SummaryItem> items, int start, int count)
+	{
+		var entries = new List<object>();
+		for (var index = start; index < start + count;)
+		{
+			var first = items[index];
+			var content = new StringBuilder();
+			for (; index < start + count && items[index].Sequence == first.Sequence; index++)
+				content.Append(items[index].Content);
+			entries.Add(first.Interrupted
+				? new { role = first.Role, content = content.ToString(), interrupted = true }
+				: (object)new { role = first.Role, content = content.ToString() });
+		}
+		return entries;
+	}
+
+	private void CommitSummary(string summary, long through)
+	{
+		lock (_stateLock)
+		{
+			_state.Summary = summary;
+			_state.SummaryThrough = through;
+			_state.SummaryUpdatedAt = DateTimeOffset.UtcNow;
+			SaveState();
 		}
 	}
 
 	private bool CanRun => _settings.Enabled && !_disabled && !_offline;
 
-	private async Task<T?> RunAsync<T>(MediatorOperation operation, string input, int maxOutputTokens,
+	// Picks the first candidate that fits the room left by the instructions and the output reserve.
+	private static Func<int, string?> FirstFitting(params string[] candidates) =>
+		room => candidates.FirstOrDefault(candidate => MediationText.CountTokens(candidate) <= room);
+
+	private async Task<T?> RunAsync<T>(MediatorOperation operation, Func<int, string?> fitInput, int maxOutputTokens,
 		Func<string, T> parse, CancellationToken cancellationToken) where T : class
 	{
 		if (!CanRun) return null;
@@ -240,6 +375,7 @@ public sealed class MediatorService : IMediatorSession
 		budget.CancelAfter(TimeSpan.FromSeconds(_settings.CallTimeoutSeconds));
 		_busy = true;
 		SetStatus("Mediating..");
+		var input = "";
 		try
 		{
 			_configuration.EnsureDocuments();
@@ -249,11 +385,18 @@ public sealed class MediatorService : IMediatorSession
 				var catalog = await _runtime.ListModelsAsync(budget.Token).ConfigureAwait(false);
 				var selected = catalog.FirstOrDefault(model => model.Alias.Equals(_settings.ModelAlias, StringComparison.OrdinalIgnoreCase))
 					?? throw new LocalModelUnavailableException($"Local model '{_settings.ModelAlias}' is unavailable.");
-				_contextTokens = (int)Math.Clamp(selected.ContextTokens ?? 4096, 2048, int.MaxValue);
+				_contextTokens = (int)Math.Clamp(selected.ContextTokens ?? PracticalContextTokens, 2048, PracticalContextTokens);
 				_catalogRead = true;
 			}
-			if (MediationText.CountTokens(instructions) + MediationText.CountTokens(input) + maxOutputTokens + 128 > _contextTokens)
-				throw new InvalidDataException("The local task exceeds the model's context budget; original content was retained.");
+			if (fitInput(_contextTokens - MediationText.CountTokens(instructions) - maxOutputTokens - 128) is not { } fitting)
+			{
+				// Oversized content is a property of the input rather than a model fault, so it never counts toward disabling.
+				DiagnosticReceived?.Invoke(new(operation, "", "",
+					"Skipped: the content exceeds the local processing budget; original content was retained."));
+				SetStatus("Mediator ready");
+				return null;
+			}
+			input = fitting;
 			await _runtime.LoadAsync(_settings.ModelAlias, budget.Token).ConfigureAwait(false);
 			var response = await _runtime.GenerateAsync(instructions, input, maxOutputTokens, budget.Token).ConfigureAwait(false);
 			budget.Token.ThrowIfCancellationRequested();
@@ -268,7 +411,7 @@ public sealed class MediatorService : IMediatorSession
 					originalInput = JsonSerializer.Deserialize<JsonElement>(input),
 					invalidResponse = response.Text,
 					validationError = ex.Message,
-				});
+				}, InputOptions);
 				if (MediationText.CountTokens(instructions) + MediationText.CountTokens(repair) + maxOutputTokens + 128 > _contextTokens)
 					throw new InvalidDataException("The local response was invalid and cannot be corrected within the context budget.", ex);
 				DiagnosticReceived?.Invoke(new(operation, input, response.Text, "Requesting one schema correction within the original timeout."));
@@ -371,6 +514,7 @@ public sealed class MediatorService : IMediatorSession
 		}
 	}
 
+	private sealed record SummaryItem(long Sequence, bool EndsEntry, string Role, string Content, bool Interrupted);
 	private sealed record RewriteResponse
 	{
 		public required string Prompt { get; init; }

@@ -8,8 +8,11 @@ license: Apache-2.0
 
 ## When to Use
 
-Merge `previousSummary` with the new `entries`. Each entry has a role and content.
-An interrupted response is incomplete, not a successful outcome.
+Merge `previousSummary` with the new `entries`. Each entry has a `role` and `content`:
+`user` is a request, `answer` is the user's reply to an assistant question,
+`assistant` is a reported response, `history` is an excerpt of an earlier transcript,
+and `bootstrap` is a summary carried over from a previous session. An entry marked
+`interrupted` is incomplete, not a successful outcome.
 
 ## Rules
 
@@ -23,6 +26,7 @@ reported rather than confirmed. Do not add goals or instructions of your own.
 Keep the summary within one short page, preferably below 700 tokens.
 Return exactly one key, summary. Put goals, constraints, next actions, and other
 details inside that string. Do not add nextAction, goal, or other JSON properties.
+Do not copy entry field names such as role or interrupted into the summary.
 
 ## Gotchas
 

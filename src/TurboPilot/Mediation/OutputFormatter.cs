@@ -15,7 +15,31 @@ internal static class OutputFormatter
 		RegexOptions.Compiled, TimeSpan.FromSeconds(1));
 	private static readonly HashSet<string> ImageExtensions = new(StringComparer.OrdinalIgnoreCase)
 		{ ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico" };
+	private static readonly Regex ListItem = new(@"^(?:[-+]\s|\d+[.)]\s)", RegexOptions.Compiled, TimeSpan.FromSeconds(1));
 	private const long MaxImageBytes = 4 * 1024 * 1024;
+
+	// A heading can only replace a short plain-text line that stands alone after a blank line.
+	// Responses without one gain nothing from model suggestions, since file links need no model.
+	public static bool HasHeadingCandidate(string output)
+	{
+		var lines = output.ReplaceLineEndings("\n").Split('\n');
+		var fenced = false;
+		for (var index = 0; index < lines.Length; index++)
+		{
+			var line = lines[index].Trim();
+			if (line.StartsWith("```", StringComparison.Ordinal) || line.StartsWith("~~~", StringComparison.Ordinal))
+			{
+				fenced = !fenced;
+				continue;
+			}
+			if (fenced || line.Length is < 3 or > 100 || (index > 0 && lines[index - 1].Trim().Length > 0)
+				|| !line.Any(char.IsLetter) || line.IndexOfAny(['`', '[', ']', '#', '|', '<', '>', '*', '_']) >= 0
+				|| line[^1] is '.' or ',' or ';' || ListItem.IsMatch(line))
+				continue;
+			return true;
+		}
+		return false;
+	}
 
 	public static string Apply(string output, FormatSuggestions suggestions, string? workspace, Action<string> report)
 	{

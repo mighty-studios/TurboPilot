@@ -46,6 +46,11 @@ public sealed class ChatService : IAsyncDisposable
 	private bool _renderWriteFailed;
 	private string _mediationStatus = "Mediator off";
 	private bool _mediationAllowed = true;
+	private readonly Dictionary<string, string> _toolNames = [];
+	private TurnMessage? _turnMessage;
+	private bool _loopPrepared;
+	private const int ToolExcerptChars = 1500;
+	private const int HistoryExcerptChars = 16_000;
 
 	public ChatService(SessionStore? store = null)
 		: this(store ?? new SessionStore(), options => new CopilotClient(new CopilotClientOptions
@@ -243,18 +248,26 @@ public sealed class ChatService : IAsyncDisposable
 			if (string.IsNullOrWhiteSpace(message.Prompt))
 				throw new InvalidOperationException("The prompt filter returned an empty prompt.");
 
+			var rewrite = _mediator?.ShouldRewrite(message.Prompt) == true;
 			if (_isWorking)
 			{
 				await InterruptAsync(session, linked.Token);
 				AddNotice("[interrupted] Previous turn stopped");
+				CancelMediation();
 			}
-			CancelMediation();
-			lock (_sync) _mediationAllowed = true;
-			if (_mediator?.Enabled == true)
+			// A finished turn keeps preparing in the background unless a rewrite needs the local model now.
+			else if (rewrite)
+				CancelMediation();
+			lock (_sync)
+			{
+				_mediationAllowed = true;
+				_turnMessage = null;
+			}
+			if (rewrite)
 			{
 				_preparingInput = true;
 				StateChanged?.Invoke();
-				var prepared = await _mediator.PreparePromptAsync(message.Prompt, attachmentPaths, inputCancellation.Token).ConfigureAwait(false);
+				var prepared = await _mediator!.PreparePromptAsync(message.Prompt, attachmentPaths, inputCancellation.Token).ConfigureAwait(false);
 				message.Prompt = prepared.Prompt;
 				_preparingInput = false;
 			}
@@ -275,7 +288,6 @@ public sealed class ChatService : IAsyncDisposable
 				_turnIdle = new(TaskCreationOptions.RunContinuationsAsynchronously);
 			}
 			StateChanged?.Invoke();
-			QueueMediation(token => RefreshSummaryAsync(token));
 			try
 			{
 				await session.SendAsync(message, inputCancellation.Token);
@@ -423,8 +435,9 @@ public sealed class ChatService : IAsyncDisposable
 				return false;
 			var response = ResolveAnswer(answer, question.Choices, question.AllowFreeform, question.IsPermission);
 			RecordUserInput(answer);
-			_mediator?.Capture("user", answer);
-			QueueMediation(token => RefreshSummaryAsync(token));
+			// Permission replies are operational; other replies carry decisions that need their question.
+			if (!question.IsPermission)
+				_mediator?.Capture("answer", $"Question: {MediationText.Excerpt(question.Topic, 600)}\r\nAnswer: {response.Answer}");
 			_questions.Dequeue();
 			if (_questions.TryPeek(out var next))
 				AddNotice(next.Text);
@@ -458,13 +471,14 @@ public sealed class ChatService : IAsyncDisposable
 		throw new InvalidOperationException("Reply with a listed option number or its text.");
 	}
 
-	private Task<UserInputResponse> AwaitAnswerAsync(string text, IReadOnlyList<string> choices, bool allowFreeform, bool isPermission = false)
+	private Task<UserInputResponse> AwaitAnswerAsync(string text, IReadOnlyList<string> choices, bool allowFreeform,
+		bool isPermission = false, string? topic = null)
 	{
 		lock (_sync)
 		{
 			if (!_acceptQuestions || _disposeStarted != 0)
 				return Task.FromCanceled<UserInputResponse>(new CancellationToken(canceled: true));
-			var question = new PendingQuestion(text, choices, allowFreeform, isPermission);
+			var question = new PendingQuestion(text, choices, allowFreeform, isPermission, topic ?? text);
 			_questions.Enqueue(question);
 			if (_questions.Count == 1)
 				AddNotice(text);
@@ -496,7 +510,7 @@ public sealed class ChatService : IAsyncDisposable
 		text += allowFreeform
 			? "\r\n(Reply with an option number, its text, or your own answer and press Send.)"
 			: "\r\n(Reply with an option number or its text and press Send.)";
-		try { return await AwaitAnswerAsync(text, choices, allowFreeform); }
+		try { return await AwaitAnswerAsync(text, choices, allowFreeform, topic: request.Question); }
 		catch (OperationCanceledException)
 		{
 			return new UserInputResponse { Answer = "(user canceled)", WasFreeform = true };
@@ -593,6 +607,7 @@ public sealed class ChatService : IAsyncDisposable
 				{
 					case AssistantTurnStartEvent:
 						_isWorking = true;
+						_loopPrepared = false;
 						if (_turnIdle is null || _turnIdle.Task.IsCompleted)
 							_turnIdle = new(TaskCreationOptions.RunContinuationsAsynchronously);
 						StateChanged?.Invoke();
@@ -614,16 +629,22 @@ public sealed class ChatService : IAsyncDisposable
 						if (!_streamedMessages.Remove(message.Data.MessageId) && !string.IsNullOrEmpty(message.Data.Content))
 							EmitTranscript(display, message.Data.MessageId);
 						EmitTranscript("\r\n\r\n", message.Data.MessageId);
-						_mediator?.Capture("assistant", message.Data.Content);
-						QueueMediation(token => PrepareMessageAsync(message.Data.MessageId, display, token));
+						// Tool-request messages without text have nothing to record or prepare.
+						if (_mediator is not null && !string.IsNullOrWhiteSpace(message.Data.Content))
+						{
+							var sequence = _mediator.Capture("assistant", message.Data.Content);
+							// A later message shows the earlier one was interim narration, which only gets validated links.
+							if (_turnMessage is { } interim)
+								QueueMediation(token => PrepareMessageAsync(interim, useModel: false, token));
+							_turnMessage = new TurnMessage(message.Data.MessageId, display, sequence);
+						}
 						break;
 					case ToolExecutionCompleteEvent tool when _mediator is not null:
-						_mediator.Capture("tool", JsonSerializer.Serialize(new
-						{
-							tool.Data.Success, tool.Data.Result, tool.Data.Error,
-						}), interrupted: !tool.Data.Success);
+						CaptureToolResult(tool.Data);
 						break;
 					case ToolExecutionStartEvent tool:
+						if (_mediator is not null)
+							_toolNames[tool.Data.ToolCallId] = tool.Data.ToolName;
 						AddNotice($"[tool] {tool.Data.ToolName}");
 						break;
 					case SessionMcpServerStatusChangedEvent server:
@@ -668,15 +689,28 @@ public sealed class ChatService : IAsyncDisposable
 						SaveUsage();
 						UsageChanged?.Invoke();
 						break;
-					case SessionIdleEvent:
-						_isWorking = false;
-						_turnIdle?.TrySetResult();
+					case AssistantIdleEvent loop:
+						CompleteTurnMediation(loop.Data.Aborted == true);
+						_loopPrepared = true;
+						break;
+					case SessionIdleEvent idle:
 						_streamedMessages.Clear();
 						_completedMessages.Clear();
 						foreach (var buffer in _messageBuffers.Values)
-							_mediator?.Capture("assistant", buffer.ToString(), interrupted: true);
+						{
+							var partial = buffer.ToString();
+							if (!string.IsNullOrWhiteSpace(partial))
+								_mediator?.Capture("assistant", partial, interrupted: true);
+						}
 						_messageBuffers.Clear();
-						QueueMediation(token => RefreshSummaryAsync(token));
+						_toolNames.Clear();
+						// Queued before going idle so IsWorking never gaps between the turn and its preparation.
+						// A pass already queued by the loop's idle event is not repeated, even if it failed.
+						if (!_loopPrepared)
+							CompleteTurnMediation(idle.Data.Aborted == true);
+						_loopPrepared = false;
+						_isWorking = false;
+						_turnIdle?.TrySetResult();
 						ReleaseQuestions();
 						SaveUsage();
 						break;
@@ -797,7 +831,8 @@ public sealed class ChatService : IAsyncDisposable
 			};
 			if (!_mediator.HasHistory && _record?.Prompts.Count > 0)
 			{
-				_mediator.Capture("history", Transcript);
+				// Older sessions seed the worklog once; the opening request and the latest exchanges matter most.
+				_mediator.Capture("history", MediationText.Excerpt(Transcript, HistoryExcerptChars, headShare: 0.25));
 				QueueMediation(token => RefreshSummaryAsync(token));
 			}
 		}
@@ -856,16 +891,34 @@ public sealed class ChatService : IAsyncDisposable
 			await _mediator.GetSummaryAsync(token).ConfigureAwait(false);
 	}
 
-	private async Task PrepareMessageAsync(string messageId, string output, CancellationToken token)
+	// Model-based preparation is reserved for the final message of an agent loop, followed by one
+	// summary pass. The loop can go idle while attached shells or background agents keep the session
+	// busy, so this runs on the loop's idle event; session idle runs it only for runtimes that report
+	// just that event.
+	private void CompleteTurnMediation(bool aborted)
+	{
+		if (_turnMessage is { } final)
+		{
+			_turnMessage = null;
+			if (!aborted)
+				QueueMediation(token => PrepareMessageAsync(final, useModel: true, token));
+		}
+		QueueMediation(token => RefreshSummaryAsync(token));
+	}
+
+	private async Task PrepareMessageAsync(TurnMessage message, bool useModel, CancellationToken token)
 	{
 		if (_mediator is null) return;
-		var prepared = await _mediator.PrepareOutputAsync(output, token).ConfigureAwait(false);
+		var output = message.Text;
+		var prepared = useModel
+			? await _mediator.PrepareOutputAsync(output, message.Sequence, token).ConfigureAwait(false)
+			: _mediator.FormatOutput(output);
 		token.ThrowIfCancellationRequested();
 		if (prepared.Markdown != output)
 		{
 			lock (_sync)
 			{
-				var parts = _renderParts.Where(part => part.MessageId == messageId).ToList();
+				var parts = _renderParts.Where(part => part.MessageId == message.Id).ToList();
 				if (parts.Count > 0)
 				{
 					parts[0].Text.Clear().Append(prepared.Markdown).Append("\r\n\r\n");
@@ -878,7 +931,15 @@ public sealed class ChatService : IAsyncDisposable
 		}
 		foreach (var warning in prepared.Warnings)
 			MediatorNoticeReceived?.Invoke($"Possible {warning.Kind}: {warning.Message} Excerpt: {warning.Quote}");
-		await RefreshSummaryAsync(token).ConfigureAwait(false);
+	}
+
+	private void CaptureToolResult(ToolExecutionCompleteData data)
+	{
+		var name = _toolNames.Remove(data.ToolCallId, out var known) ? known : "tool";
+		var detail = data.Success ? data.Result?.Content : data.Error?.Message;
+		// Whole file views and command logs would dominate the worklog; bounded excerpts remain useful evidence.
+		_mediator?.Capture("tool", $"{name} {(data.Success ? "succeeded" : "failed")}\r\n"
+			+ MediationText.Excerpt(detail ?? "", ToolExcerptChars), interrupted: !data.Success);
 	}
 
 	private void SaveRendered()
@@ -1017,11 +1078,13 @@ public sealed class ChatService : IAsyncDisposable
 			: new AttachmentFile { Path = Path.GetFullPath(path), DisplayName = Path.GetFileName(path) };
 	}
 
-	private sealed record PendingQuestion(string Text, IReadOnlyList<string> Choices, bool AllowFreeform, bool IsPermission)
+	private sealed record PendingQuestion(string Text, IReadOnlyList<string> Choices, bool AllowFreeform, bool IsPermission, string Topic)
 	{
 		public TaskCompletionSource<UserInputResponse> Completion { get; } =
 			new(TaskCreationOptions.RunContinuationsAsynchronously);
 	}
+
+	private sealed record TurnMessage(string Id, string Text, long Sequence);
 
 	private sealed class RenderPart(string? messageId, string text)
 	{

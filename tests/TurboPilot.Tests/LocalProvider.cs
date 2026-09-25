@@ -89,11 +89,15 @@ internal sealed class LocalProvider : IAsyncDisposable
 
 			if (reply.ToolName is not null)
 			{
-				await Chunk(new
+				var call = new[] { new { index = 0, id = "call-" + Guid.NewGuid().ToString("N"), type = "function", function = new { name = reply.ToolName, arguments = reply.ToolArguments } } };
+				// Text before a tool call is interim narration within the same assistant message.
+				if (reply.Text.Length > 0)
 				{
-					role = "assistant",
-					tool_calls = new[] { new { index = 0, id = "call-" + Guid.NewGuid().ToString("N"), type = "function", function = new { name = reply.ToolName, arguments = reply.ToolArguments } } },
-				});
+					await Chunk(new { role = "assistant", content = reply.Text });
+					await Chunk(new { tool_calls = call });
+				}
+				else
+					await Chunk(new { role = "assistant", tool_calls = call });
 				await Chunk(new { }, "tool_calls");
 			}
 			else

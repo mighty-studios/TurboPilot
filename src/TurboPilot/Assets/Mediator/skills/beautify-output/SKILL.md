@@ -14,16 +14,18 @@ Use when `response` contains completed output to format for display.
 
 Return formatting suggestions only, not a rewritten response:
 
-`{"links":[{"text":"exact text from the response","path":"the referenced path","image":false}],"headings":["exact standalone line"]}`
+`{"links":[{"text":"path exactly as written","path":"the same exact path","image":false}],"headings":["exact standalone line"]}`
 
-Identify local file references already present in the response. Mark a reference
-as an image only for an image file. Suggest headings only for short, standalone
-plain-text section titles. Empty arrays are valid.
+Identify local file paths already written in the response, such as `src\app.cs` or
+`README.md`. Copy each path exactly into both `text` and `path`; the host links only
+text that names an existing file. Never map a bare name such as README to a file name.
+Mark a reference as an image only for an image file. Suggest headings only for short,
+standalone plain-text lines that already appear as a whole line. Empty arrays are valid.
 Always return both keys: links and headings. If there are no suggestions, return
 exactly {"links":[],"headings":[]}. A response containing only headings is invalid.
 
 ## Gotchas
 
-- Do not invent a path or search for a file.
+- Do not invent a path, a heading, or search for a file.
 - Never modify code fences, commands, tables, existing links, or images.
 - Do not change wording, facts, or conclusions. The host validates every suggestion.

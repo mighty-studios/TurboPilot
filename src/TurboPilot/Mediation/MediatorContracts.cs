@@ -39,11 +39,13 @@ public interface IMediatorSession : IAsyncDisposable
 	bool SummaryEnabled { get; }
 	bool HasHistory { get; }
 	string Status { get; }
-	void Capture(string role, string content, bool interrupted = false);
+	long Capture(string role, string content, bool interrupted = false);
 	Task ConfigureAsync(MediatorSettings settings, CancellationToken cancellationToken = default);
 	Task RecordAsync(string role, string content, bool interrupted = false, CancellationToken cancellationToken = default);
+	bool ShouldRewrite(string prompt);
 	Task<PromptPreparation> PreparePromptAsync(string prompt, IReadOnlyList<string>? attachments = null, CancellationToken cancellationToken = default);
-	Task<OutputPreparation> PrepareOutputAsync(string output, CancellationToken cancellationToken = default);
+	Task<OutputPreparation> PrepareOutputAsync(string output, long? responseSequence = null, CancellationToken cancellationToken = default);
+	OutputPreparation FormatOutput(string output);
 	Task<string?> GetSummaryAsync(CancellationToken cancellationToken = default);
 	string? CurrentSummary { get; }
 }

@@ -3,6 +3,7 @@ using System.IO;
 using System.Text.Json;
 using TurboPilot.Ai;
 using TurboPilot.Mediation;
+using TurboPilot.Permissions;
 
 namespace TurboPilot.Tests;
 
@@ -47,7 +48,7 @@ internal static class MediatedChatChecks
 		await using var provider = new LocalProvider();
 		var local = CreateRuntime();
 		var configuration = new MediatorConfiguration(Path.Combine(workspace.Root, "mediator"));
-		var options = new MediatorSettings { Enabled = true };
+		var options = new MediatorSettings { Enabled = true, MinimumRewriteTokens = 0 };
 		configuration.Save(options);
 		var chatOptions = new ChatSessionOptions
 		{
@@ -155,7 +156,7 @@ internal static class MediatedChatChecks
 				return await originalGenerate(system, input, token);
 			};
 			await canceledOutput.StartAsync(chatOptions);
-			provider.Replies.Enqueue(new LocalProvider.Reply("Preserve this response while formatting is canceled."));
+			provider.Replies.Enqueue(new LocalProvider.Reply("Results\r\n\r\nPreserve this response while formatting is canceled."));
 			await canceledOutput.SendAsync("Continue.");
 			await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
 			await canceledOutput.AbortAsync().WaitAsync(TimeSpan.FromSeconds(5));
@@ -166,7 +167,80 @@ internal static class MediatedChatChecks
 				"Canceling local processing must not lose captured output.");
 			Check.True(canceledOutput.Transcript.Contains("Preserve this response"), "Keep streamed Raw content after cancellation.");
 		}
+		await CheckAgenticTurnAsync(workspace, provider, chatOptions, CreateChat, () => local = CreateRuntime());
+		await CheckFailedSummaryOnceAsync(provider, chatOptions, CreateChat, () => local = CreateRuntime());
 		Check.Equal(0, provider.Errors.Count, "The mediated loopback provider must not hide failures");
 		Console.WriteLine("PASS mediated native chat, separate output persistence, diagnostic isolation, restart context, and cancellation");
+	}
+
+	// Both idle events end a turn; a summary pass that failed at the first must not run again at the second.
+	private static async Task CheckFailedSummaryOnceAsync(LocalProvider provider, ChatSessionOptions chatOptions,
+		Func<ChatService> createChat, Func<FakeLocalRuntime> resetRuntime)
+	{
+		var local = resetRuntime();
+		var working = local.Generate!;
+		local.Generate = (system, input, token) => system.Contains("# Maintain a Summary")
+			? Task.FromResult(new LocalCompletion("{broken")) : working(system, input, token);
+		await using var chat = createChat();
+		await chat.StartAsync(chatOptions);
+		provider.Replies.Enqueue(new LocalProvider.Reply("Done."));
+		await RuntimeChecks.SendAndWaitAsync(chat, "Continue.");
+		Check.Equal(2, local.Requests.Count(request => request.System.Contains("# Maintain a Summary")),
+			"Correct a failed summary once without repeating the pass at session idle");
+		Console.WriteLine("PASS failed summary pass is not repeated within a turn");
+	}
+
+	// Mirrors a live turn: narration with a tool call, a permission reply, a model question, then the answer.
+	private static async Task CheckAgenticTurnAsync(TestWorkspace workspace, LocalProvider provider, ChatSessionOptions chatOptions,
+		Func<ChatService> createChat, Func<FakeLocalRuntime> resetRuntime)
+	{
+		var local = resetRuntime();
+		var scopeKey = PermissionService.MakeKey(workspace.Workspace);
+		var scopes = PermissionService.Current.Workspaces;
+		scopes.TryGetValue(scopeKey, out var originalScope);
+		scopes[scopeKey] = new PermissionScope { Operations = [] };
+		try
+		{
+			await using var turn = createChat();
+			await turn.StartAsync(chatOptions);
+			provider.Replies.Enqueue(new LocalProvider.Reply("Checking `README.md` before answering.", ToolName: "powershell",
+				ToolArguments: """{"command":"Write-Output MediatedToolProbe","description":"Write a fixture marker"}"""));
+			provider.Replies.Enqueue(new LocalProvider.Reply("", ToolName: "ask_user",
+				ToolArguments: """{"question":"Which summary style?","choices":["short","long"],"allowFreeform":false}"""));
+			provider.Replies.Enqueue(new LocalProvider.Reply("Results\r\n\r\nSee `README.md`."));
+			await turn.SendAsync("Review README.md.");
+			await Check.UntilAsync(() => turn.HasPendingQuestion && turn.Transcript.Contains("Permission requested"), "The permission request did not wait.");
+			await turn.SendAsync("1");
+			await Check.UntilAsync(() => turn.HasPendingQuestion && turn.Transcript.Contains("Which summary style?"), "The model question did not wait.");
+			await turn.SendAsync("2");
+			await Check.UntilAsync(() => !turn.IsWorking && !turn.HasPendingQuestion && turn.Transcript.Contains("See `README.md`."),
+				"The agentic turn and its local processing did not finish.", timeoutSeconds: 30);
+			var requests = local.Requests.ToList();
+			var formatting = requests.Where(request => request.System.Contains("# Prepare Output")).ToList();
+			Check.Equal(1, formatting.Count, "Format only the turn's final message with the local model");
+			Check.True(formatting[0].Input.Contains("See `README.md`."), "Prepare the final answer rather than interim narration.");
+			Check.Equal(1, requests.Count(request => request.System.Contains("# Monitor Output")), "Monitor only the turn's final message");
+			Check.Equal(1, requests.Count(request => request.System.Contains("# Maintain a Summary")), "Summarize the whole turn once");
+			Check.True(turn.RenderedTranscript.Split("kp-path:").Length - 1 >= 2, "Link files in interim narration and in the answer.");
+
+			var worklog = new MediationStore(turn.SessionId!, workspace.Workspace, Path.Combine(workspace.Root, "worklogs"))
+				.Load(turn.SessionId!, workspace.Workspace);
+			Check.Equal("user,assistant,answer,assistant", string.Join(",", worklog.Entries.Where(entry => entry.Role != "tool").Select(entry => entry.Role)),
+				"Record the turn without permission replies or empty tool-request messages");
+			var shell = worklog.Entries.FirstOrDefault(entry => entry.Role == "tool" && entry.Content.StartsWith("powershell succeeded"));
+			Check.True(shell?.Content.Contains("MediatedToolProbe") == true,
+				"Record a compact tool result with its tool name: " + JsonSerializer.Serialize(worklog.Entries));
+			var answer = worklog.Entries.Single(entry => entry.Role == "answer");
+			Check.True(answer.Content.Contains("Which summary style?") && answer.Content.Contains("Answer: long"),
+				"Record a model question's answer with the question: " + answer.Content);
+		}
+		finally
+		{
+			if (originalScope is null)
+				scopes.Remove(scopeKey);
+			else
+				scopes[scopeKey] = originalScope;
+		}
+		Console.WriteLine("PASS agentic turn: final-message processing, one summary pass, and compact worklog entries");
 	}
 }

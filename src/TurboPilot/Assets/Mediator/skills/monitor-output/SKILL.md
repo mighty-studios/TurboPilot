@@ -9,6 +9,8 @@ license: Apache-2.0
 ## When to Use
 
 Inspect `response` in light of `prompt`, `summary`, and any supplied `evidence`.
+`prompt` is the latest user request. Each `evidence` item is an excerpt of a recent
+tool result; omitted text is marked `[...]`.
 
 ## Rules
 
@@ -22,5 +24,6 @@ Stop immediately after the closing brace. Do not add markdown fences or explain 
 
 - Every warning needs an exact supporting excerpt from the response.
 - Lack of independent evidence does not prove a hallucination. Describe uncertainty.
+- Evidence is partial: a detail missing from an excerpt is not a contradiction.
 - Do not invent verification results or claim access to files, tools, or the internet.
 - Normal code repetition, quoted examples, and explicit caveats are not defects by themselves.
