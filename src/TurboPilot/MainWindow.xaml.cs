@@ -927,7 +927,15 @@ public partial class MainWindow : TurbolandWindow
 	private async Task EndChatCoreAsync()
 	{
 		if (_chat is { } chat)
+		{
+			// Asked before the runtime is torn down, since the model that
+			// worked the session is the only thing that can say what it
+			// was about. It is bounded and best effort: a line in a list
+			// is not worth holding up a shutdown for.
+			statusTextBlock.Text = "Summarizing the session..";
+			await chat.ArchiveAsync();
 			await chat.DisposeAsync();
+		}
 		_chat = null;
 		_sessionModel = null;
 		_sessionId = null;

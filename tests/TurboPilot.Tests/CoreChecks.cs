@@ -22,6 +22,7 @@ internal static class CoreChecks
 		await CheckCliUpdateAsync();
 		CheckWorkspaceReadme();
 		CheckShortText();
+		CheckArchiveLine();
 		CheckSlashCommands();
 		CheckSessionDetails();
 		CheckWorkspaceChanges();
@@ -401,16 +402,65 @@ internal static class CoreChecks
 		Check.Equal("publisher/", ShortText.Model("publisher/", 34), "A trailing separator is not a segment break");
 		Check.Equal(34, ShortText.Model("vendor/" + new string('m', 200)).Length, "Clip the segment too");
 
+		Check.Equal("TurboPilot", ShortText.Workspace(@"D:\dev\projects\TurboPilot"),
+			"A workspace is known by its folder, not by the path every project shares");
+		Check.Equal("TurboPilot", ShortText.Workspace(@"D:\dev\projects\TurboPilot\"),
+			"A trailing separator is not a folder of its own");
+		Check.Equal("work", ShortText.Workspace("/home/me/work"), "Either separator ends a segment");
+		Check.Equal("D:", ShortText.Workspace(@"D:\"), "A drive root has no leaf to take and stands for itself");
+		Check.Equal("", ShortText.Workspace(null), "No workspace yields nothing to show");
+		Check.Equal(24, ShortText.Workspace(new string('w', 90)).Length, "A long folder name is clipped like the rest");
+
 		var record = new SessionRecord
 		{
 			SessionId = "workspace-" + new string('9', 60),
-			Options = new ChatSessionOptions { Model = "registry.example.com/org/" + new string('m', 120) },
+			Options = new ChatSessionOptions
+			{
+				Model = "registry.example.com/org/" + new string('m', 120),
+				WorkspaceFolder = @"D:\dev\projects\TurboPilot",
+			},
 			Description = new string('d', 400),
 		};
 		Check.True(record.DisplayLabel.Length < 140, "A Past Sessions row must stay a predictable width.");
+		Check.True(record.DisplayLabel.Contains("TurboPilot"), "A row must name the folder the session ran against.");
+		Check.True(!record.DisplayLabel.Contains('m'), "The model belongs in the details, not in the row.");
+
+		record.Summary = "Reworked the Past Sessions listing.";
+		Check.True(record.DisplayLabel.EndsWith("Reworked the Past Sessions listing.", StringComparison.Ordinal),
+			"A summary says what the session turned out to be, so it wins over the opening prompt.");
+
+		record.Summary = "";
 		record.Description = "";
 		Check.True(record.DisplayLabel.Length < 90 && record.DisplayLabel.Contains("workspace-"),
-			"A row without a description still names its session.");
+			"A row with nothing said about it still names its session.");
+
+		var homeless = new SessionRecord { SessionId = "s1", Options = new ChatSessionOptions() };
+		Check.True(homeless.DisplayLabel.Contains("no workspace"),
+			"A session without a workspace says so rather than leaving the column blank.");
+	}
+
+	/// <summary>
+	/// The one sentence kept for the archive. The summarizer writes prose
+	/// with markdown in it, and a list row shows whatever it is given
+	/// literally, so what matters is that one plain sentence comes out.
+	/// </summary>
+	private static void CheckArchiveLine()
+	{
+		Check.Equal("The session reworked the Past Sessions listing.",
+			ChatService.ArchiveLine("## Overview\r\n\r\nThe session reworked the Past Sessions listing. It also added tests."),
+			"Take the first sentence and leave the heading behind");
+		Check.Equal("The session added a summary written at shutdown.",
+			ChatService.ArchiveLine("- **The session** added a `summary` written at shutdown."),
+			"Strip the decoration a row would otherwise show literally");
+		Check.Equal("Work continued on the e.g. archive line.",
+			ChatService.ArchiveLine("Work continued on the e.g. archive line. More followed."),
+			"An abbreviation is not the end of the sentence");
+		Check.Equal("", ChatService.ArchiveLine(""), "Nothing said yields nothing stored");
+		Check.Equal("", ChatService.ArchiveLine("# Heading\r\n\r\n## Another"), "Headings alone say nothing about a session");
+		Check.True(ChatService.ArchiveLine(new string('w', 400)).Length <= 200,
+			"A sentence that never ends is still bounded.");
+		Check.True(!ChatService.ArchiveLine("First line\r\nsecond line. Third.").Contains('\n'),
+			"A row is one line, so the sentence must be one line.");
 	}
 
 	/// <summary>

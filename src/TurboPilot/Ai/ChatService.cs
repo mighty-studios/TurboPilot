@@ -1265,6 +1265,115 @@ public sealed class ChatService : IAsyncDisposable
 		return (start >= 0 && end > start ? text[(start + "<summary>".Length)..end] : text).Trim();
 	}
 
+	/// <summary>
+	/// How long the archive summary may hold up the end of a session. A
+	/// line in a list is not worth making somebody wait to close the
+	/// program, so the call is abandoned rather than waited out.
+	/// </summary>
+	private static readonly TimeSpan ArchiveTimeout = TimeSpan.FromSeconds(20);
+
+	/// <summary>
+	/// Records one sentence saying what the session was about, asked of
+	/// the model as the session ends.
+	///
+	/// It is written at the end because that is the only point at which
+	/// the answer is known: the opening prompt says what was intended,
+	/// which is frequently not what the session turned out to be, and
+	/// that is the thing worth reading in an archive months later.
+	///
+	/// Everything about it is best effort. A session that sent nothing
+	/// has nothing to say, and a failure, a timeout or a runtime already
+	/// on its way down leaves the previous line in place rather than
+	/// holding up the shutdown it is part of.
+	/// </summary>
+	public async Task<string?> ArchiveAsync(CancellationToken cancellationToken = default)
+	{
+		var session = _session;
+		SessionRecord? record;
+		lock (_sync) record = _record;
+		if (session is null || record is null || _disposeStarted != 0) return null;
+		lock (_sync)
+		{
+			if (record.Requests.Count == 0) return null;
+			// Nothing has been asked since the last summary, so the answer
+			// would be the sentence already stored.
+			if (record.Summary.Length > 0 && record.SummaryRequests == record.Requests.Count) return null;
+		}
+
+		try
+		{
+			if (_isWorking || HasPendingQuestion)
+				await AbortAsync().ConfigureAwait(false);
+
+			using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
+			linked.CancelAfter(ArchiveTimeout);
+#pragma warning disable GHCP001
+			var result = await session.Rpc.History.SummarizeForHandoffAsync(linked.Token).ConfigureAwait(false);
+#pragma warning restore GHCP001
+			var sentence = ArchiveLine(HandoffSummary(result.Summary ?? ""));
+			if (sentence.Length == 0) return null;
+
+			lock (_sync)
+			{
+				record.Summary = sentence;
+				record.SummaryRequests = record.Requests.Count;
+				_store.Save(record);
+			}
+			return sentence;
+		}
+		catch (Exception ex) when (ex is not OutOfMemoryException)
+		{
+			// The session is ending either way. A line that could not be
+			// written is worth saying once and is not worth stopping for.
+			ErrorReceived?.Invoke("Could not summarize the session for the archive: " + ex.Message);
+			return null;
+		}
+	}
+
+	/// <summary>
+	/// The one sentence taken from a hand-off summary. The summarizer
+	/// writes prose with markdown in it and leads with what the session
+	/// was about, so the opening sentence is the line worth keeping;
+	/// decoration is stripped because a list row shows it literally.
+	/// </summary>
+	internal static string ArchiveLine(string summary)
+	{
+		var flat = new StringBuilder();
+		foreach (var line in (summary ?? "").Replace("\r\n", "\n").Split('\n'))
+		{
+			var trimmed = line.Trim().TrimStart('#', '-', '*', '>', ' ').Replace("**", "").Replace("`", "");
+			if (trimmed.Length == 0) continue;
+			// A heading is a label for what follows, not a statement about
+			// the session, so it is skipped rather than reported as one.
+			if (line.TrimStart().StartsWith('#') || (trimmed.Length < 40 && !trimmed.Contains(' '))) continue;
+			if (flat.Length > 0) flat.Append(' ');
+			flat.Append(trimmed);
+			if (flat.Length > 400) break;
+		}
+
+		var text = string.Join(" ", flat.ToString().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+
+		// A sentence ends at a terminator that is followed by the end of
+		// the text or by a new sentence. Inside "e.g." the terminator is
+		// followed by a letter, and after it by a lowercase word, so
+		// neither is mistaken for the end.
+		for (var i = 0; i < text.Length; i++)
+		{
+			if (text[i] is not ('.' or '!' or '?')) continue;
+			if (i + 1 >= text.Length)
+				break;
+			if (text[i + 1] != ' ')
+				continue;
+			var next = i + 2;
+			if (next < text.Length && !char.IsUpper(text[next]))
+				continue;
+			text = text[..(i + 1)];
+			break;
+		}
+
+		return ShortText.Clip(text, 200);
+	}
+
 	public void SetBootstrap(SummaryBootstrap bootstrap)
 	{
 		if (_record is null || _session is null)

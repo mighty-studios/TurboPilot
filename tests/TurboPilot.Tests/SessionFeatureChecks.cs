@@ -29,6 +29,7 @@ internal static class SessionFeatureChecks
 		await CheckRenderedLinksAsync(workspace, provider, options);
 		await CheckLiveChangesAsync(workspace, provider, options);
 		await CheckHandoffAsync(workspace, provider, options);
+		await CheckArchiveAsync(workspace, provider, options);
 		await CheckAgenticLinksAsync(workspace, provider, options);
 		await CheckPlanAsync(workspace, provider, options);
 		Check.Equal(0, provider.Errors.Count, "The loopback provider must not hide failures: " + string.Join(" | ", provider.Errors));
@@ -256,6 +257,67 @@ internal static class SessionFeatureChecks
 				"Keep the original opening request across chained restarts: " + string.Join(" | ", chained.RecentRequests));
 		}
 		Check.Equal("Plain reply.", ChatService.HandoffSummary(" Plain reply. "), "Use an untagged reply as the summary");
+	}
+
+	/// <summary>
+	/// The one sentence the archive keeps. It is asked of the model as
+	/// the session ends, so what has to hold is that it is stored where
+	/// the list reads it, that a session with nothing to say does not
+	/// ask, and that a failure to answer leaves the shutdown alone.
+	/// </summary>
+	private static async Task CheckArchiveAsync(TestWorkspace workspace, LocalProvider provider, ChatSessionOptions options)
+	{
+		string sessionId;
+		await using (var quiet = workspace.CreateChat())
+		{
+			await quiet.StartAsync(options);
+			var before = provider.Requests.Count;
+			Check.True(await quiet.ArchiveAsync() is null && provider.Requests.Count == before,
+				"A session that sent nothing has nothing to summarize and must not ask.");
+		}
+
+		await using (var chat = workspace.CreateChat())
+		{
+			await chat.StartAsync(options);
+			sessionId = chat.SessionId!;
+			provider.Replies.Enqueue(new LocalProvider.Reply("Documented."));
+			await RuntimeChecks.SendAndWaitAsync(chat, OpeningRequest);
+
+			var before = provider.Requests.Count;
+			provider.Replies.Enqueue(new LocalProvider.Reply(
+				"<analysis>Notes.</analysis>\n<summary>\n## Overview\n\n**Documented** the readme without touching code. More detail followed.\n</summary>"));
+			var line = await chat.ArchiveAsync();
+			Check.Equal("Documented the readme without touching code.", line,
+				"Keep one plain sentence out of what the model wrote");
+			Check.Equal(before + 1, provider.Requests.Count, "Ask the session model once");
+			Check.True(!chat.Transcript.Contains("Overview"), "The archive line must not appear in the conversation.");
+			Check.Equal(line, workspace.Store.Load(sessionId).Summary, "Store the line where the list reads it");
+			Check.True(workspace.Store.Load(sessionId).DisplayLabel.EndsWith(line!, StringComparison.Ordinal),
+				"The Past Sessions row must show the stored line");
+		}
+
+		// A session reopened and closed again without being asked
+		// anything has nothing new to say.
+		await using (var reopened = workspace.CreateChat())
+		{
+			await reopened.ResumeAsync(sessionId, options);
+			var before = provider.Requests.Count;
+			Check.True(await reopened.ArchiveAsync() is null && provider.Requests.Count == before,
+				"An unchanged session must not spend a model call rewriting the same sentence.");
+		}
+
+		// A session already summarized is reopened and ends without an
+		// answer: the previous line has to survive rather than be cleared.
+		await using (var resumed = workspace.CreateChat())
+		{
+			await resumed.ResumeAsync(sessionId, options);
+			provider.Replies.Enqueue(new LocalProvider.Reply("Continued."));
+			await RuntimeChecks.SendAndWaitAsync(resumed, "Carry on.");
+			provider.Replies.Enqueue(new LocalProvider.Reply("<summary>\n \n</summary>"));
+			Check.True(await resumed.ArchiveAsync() is null, "An empty answer is not a summary.");
+			Check.Equal("Documented the readme without touching code.", workspace.Store.Load(sessionId).Summary,
+				"A session that could not summarize keeps the line it already had");
+		}
 	}
 
 	// Narration that accompanies a tool call is linked as well as the final answer, across a

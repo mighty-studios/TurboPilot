@@ -74,7 +74,17 @@ internal sealed class LocalProvider : IAsyncDisposable
 			var request = document.RootElement.Clone();
 			Requests.Enqueue(request);
 			if (!Replies.TryDequeue(out reply))
-				throw new InvalidOperationException("The provider received an unscripted request.");
+			{
+				// A session end asks the model for one sentence for the
+				// archive, and that request is not streamed. Answering it
+				// with nothing spares every check that merely ends a
+				// session from having to script a summary it never reads,
+				// while an unscripted streamed turn is still a failure.
+				var streamed = request.TryGetProperty("stream", out var streaming) && streaming.ValueKind == JsonValueKind.True;
+				if (streamed)
+					throw new InvalidOperationException("The provider received an unscripted request.");
+				reply = new Reply("");
+			}
 			reply.Started.TrySetResult();
 			var id = "fixture-" + Guid.NewGuid().ToString("N");
 			// Some runtime requests, such as hand-off summaries, ask for one complete JSON response.

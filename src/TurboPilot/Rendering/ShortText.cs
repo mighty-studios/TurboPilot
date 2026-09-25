@@ -49,4 +49,22 @@ internal static class ShortText
 	/// opening characters, so the head is kept and the tail dropped.
 	/// </summary>
 	internal static string SessionId(string? sessionId, int max = 14) => Clip(sessionId, max);
+
+	/// <summary>
+	/// The folder a workspace is known by. A full path is mostly the
+	/// part every project on the machine has in common, so the leaf
+	/// carries what tells one session's workspace from another's. A
+	/// trailing separator is ignored, and a drive root has no leaf to
+	/// take, so it stands for itself.
+	/// </summary>
+	internal static string Workspace(string? path, int max = 24)
+	{
+		var text = (path ?? "").Trim();
+		if (text.Length == 0) return "";
+		var trimmed = text.TrimEnd('\\', '/');
+		if (trimmed.Length == 0) return Clip(text, max);
+		var slash = trimmed.LastIndexOfAny(['/', '\\']);
+		var leaf = slash >= 0 ? trimmed[(slash + 1)..] : trimmed;
+		return Clip(leaf.Length == 0 ? trimmed : leaf, max);
+	}
 }

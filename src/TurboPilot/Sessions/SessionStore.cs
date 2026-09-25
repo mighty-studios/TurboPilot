@@ -23,6 +23,25 @@ public sealed class SessionRecord
 	public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
 	public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 	public string Description { get; set; } = "";
+
+	/// <summary>
+	/// One sentence saying what the session was about, written by the
+	/// model as the session ends. An archive is read long after the work
+	/// is forgotten, so what it needs is what the session turned out to
+	/// be, which is not knowable when the opening prompt is typed. Empty
+	/// until the session has ended at least once, and empty for a session
+	/// that ended before this was recorded.
+	/// </summary>
+	public string Summary { get; set; } = "";
+
+	/// <summary>
+	/// How many requests had been sent when the summary was written. A
+	/// session reopened and closed again without being asked anything
+	/// has nothing new to say, and asking anyway would spend a model
+	/// call to rewrite the same sentence.
+	/// </summary>
+	public int SummaryRequests { get; set; }
+
 	public List<string> Prompts { get; set; } = [];
 	// Prompts also holds answers to model questions; Requests holds only the user's own prompts.
 	public List<string> Requests { get; set; } = [];
@@ -48,16 +67,28 @@ public sealed class SessionRecord
 	public bool BootstrapPending { get; set; }
 
 	/// <summary>
-	/// The Past Sessions row: when the session last ran, the model it ran
-	/// on, and either its description or its ID. Model names and
-	/// descriptions both run long, so each is clipped to a fixed budget
-	/// and the row stays a predictable width.
+	/// The Past Sessions row: when the session last ran, the folder it
+	/// ran against, and what it was about. The model and the settings are
+	/// left to the details pane, because they are the same across most
+	/// rows and so tell one row from another least. Each part is clipped
+	/// to a fixed budget so the row stays a predictable width.
+	///
+	/// The summary is preferred, then the opening prompt for a session
+	/// that ended before summaries were recorded, then the ID, which
+	/// always exists.
 	/// </summary>
 	[JsonIgnore]
-	public string DisplayLabel => $"{UpdatedAt.ToLocalTime():g} | {Rendering.ShortText.Model(Options.Model, 28)} | "
-		+ (string.IsNullOrWhiteSpace(Description)
-			? Rendering.ShortText.SessionId(SessionId, 24)
-			: Rendering.ShortText.Clip(Description, 72));
+	public string DisplayLabel
+	{
+		get
+		{
+			var said = !string.IsNullOrWhiteSpace(Summary) ? Rendering.ShortText.Clip(Summary, 96)
+				: !string.IsNullOrWhiteSpace(Description) ? Rendering.ShortText.Clip(Description, 96)
+				: Rendering.ShortText.SessionId(SessionId, 24);
+			var workspace = Rendering.ShortText.Workspace(Options.WorkspaceFolder);
+			return $"{UpdatedAt.ToLocalTime():g} | {(workspace.Length == 0 ? "no workspace" : workspace)} | {said}";
+		}
+	}
 }
 
 public sealed class SessionStore
