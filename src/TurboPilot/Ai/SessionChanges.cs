@@ -1,0 +1,41 @@
+using TurboPilot.Permissions;
+
+namespace TurboPilot.Ai;
+
+public enum SessionChange
+{
+	// A new session without carried context: no running session, another workspace, or no changes.
+	Fresh,
+	// Model, reasoning effort, built-in mode, and file linking change on the running session.
+	Live,
+	// A setting fixed when the session was created changed; the replacement can carry a hand-off.
+	Restart,
+}
+
+public static class SessionChanges
+{
+	public static SessionChange Classify(ChatSessionOptions current, ChatSessionOptions next)
+	{
+		if (!SameWorkspace(current.WorkspaceFolder, next.WorkspaceFolder) || string.IsNullOrWhiteSpace(current.WorkspaceFolder))
+			return SessionChange.Fresh;
+		// Custom agents are configured at creation. A BYOK provider also receives the context
+		// window then, and a smaller window must not be applied to a running session.
+		if (current.UseByok != next.UseByok
+			|| (next.UseByok && (current.ByokEndpoint != next.ByokEndpoint || current.ByokApiKey != next.ByokApiKey))
+			|| current.ApplyInstructions != next.ApplyInstructions || current.PreloadSkills != next.PreloadSkills
+			|| (current.Mode != next.Mode && !(IsBuiltInMode(current.Mode) && IsBuiltInMode(next.Mode)))
+			|| (current.UseByok && current.ContextWindowTokens != next.ContextWindowTokens))
+			return SessionChange.Restart;
+		return current.Model != next.Model || (current.ReasoningEffort ?? "") != (next.ReasoningEffort ?? "")
+			|| current.Mode != next.Mode || current.LinkFiles != next.LinkFiles
+			|| current.ContextWindowTokens != next.ContextWindowTokens
+			? SessionChange.Live : SessionChange.Fresh;
+	}
+
+	public static bool IsBuiltInMode(string mode) => mode is "Standard" or "Plan" or "Autopilot";
+
+	public static bool SameWorkspace(string? first, string? second) =>
+		!string.IsNullOrWhiteSpace(first) && !string.IsNullOrWhiteSpace(second)
+			? PermissionService.MakeKey(first) == PermissionService.MakeKey(second)
+			: string.IsNullOrWhiteSpace(first) && string.IsNullOrWhiteSpace(second);
+}

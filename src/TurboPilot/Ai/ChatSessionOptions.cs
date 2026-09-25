@@ -14,6 +14,7 @@ public sealed record ChatSessionOptions
 	public string ByokEndpoint { get; init; } = "";
 	public bool ApplyInstructions { get; init; } = true;
 	public bool PreloadSkills { get; init; } = true;
+	public bool LinkFiles { get; init; } = true;
 
 	[JsonIgnore]
 	public string ByokApiKey { get; init; } = "";

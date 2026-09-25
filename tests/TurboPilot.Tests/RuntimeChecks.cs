@@ -302,7 +302,7 @@ internal static class RuntimeChecks
 		Check.Equal(0, provider.Errors.Count, "The local provider must not hide request failures");
 	}
 
-	private static CopilotSession GetSession(ChatService chat) =>
+	internal static CopilotSession GetSession(ChatService chat) =>
 		(CopilotSession)typeof(ChatService).GetField("_session", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(chat)!;
 
 	internal static async Task SendAndWaitAsync(ChatService chat, string prompt, IReadOnlyList<string>? attachments = null)
@@ -321,6 +321,7 @@ internal static class RuntimeChecks
 		{
 			await chat.SendAsync(prompt, attachments);
 			await idle.Task.WaitAsync(TimeSpan.FromSeconds(30));
+			await chat.WhenRenderedAsync().WaitAsync(TimeSpan.FromSeconds(10));
 			Check.True(!chat.Transcript.Contains("[error]"), "The runtime reported an error: " + chat.Transcript);
 		}
 		finally

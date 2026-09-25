@@ -57,6 +57,9 @@ public sealed class Settings
 	/// <summary>Whether enabled skills preload into the session context.</summary>
 	public bool PreloadSkills { get; set; } = true;
 
+	/// <summary>Whether Rendered output links mentioned local files and previews images.</summary>
+	public bool LinkFiles { get; set; } = true;
+
 	/// <summary>
 	/// Loads settings from disk. Returns a default instance if the file
 	/// doesn't exist or fails to parse.

@@ -145,6 +145,9 @@
 				<CheckBox x:Name="checkPreloadSkills" Content="Preload Skills"
 						Margin="0,4,0,0"
 						ToolTip="Load enabled skills into the session context"/>
+				<CheckBox x:Name="checkLinkFiles" Content="Link Files in Rendered Output"
+						Margin="0,4,0,0"
+						ToolTip="Link mentioned local files and preview referenced images in Rendered output. Raw output is unchanged."/>
 			</StackPanel>
 		</GroupBox>
 

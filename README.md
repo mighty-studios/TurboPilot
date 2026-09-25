@@ -10,9 +10,19 @@ Send a prompt with **Send** or **Ctrl+Enter**. Sending while a response is runni
 
 The **Model Output** heading sits above the Raw and Rendered tabs, and the **User Prompt** editor fills the lower pane. Drag the divider to adjust the split; both panes continue filling the window when it is resized.
 
-The **Raw** tab preserves streamed conversation text. **Rendered** supports markdown and Mermaid diagrams, plus optional Mediator formatting of completed responses. Questions and permission requests appear in chat: reply with an option number or its text, or a freeform answer when offered. Invalid answers leave the question pending. Plan approval also happens in chat.
+The **Raw** tab preserves streamed conversation text. **Rendered** supports markdown and Mermaid diagrams, plus links and image previews for local files that replies mention. Questions and permission requests appear in chat: reply with an option number or its text, or a freeform answer when offered. Invalid answers leave the question pending. Plan approval also happens in chat.
 
 The status line shows `Starting..`, `Ready..`, `Working..`, or `Waiting..`, followed by context usage in whole Ki tokens. Cloud sessions also display whole AI Credits as `AiC=<value>`.
+
+## File links in Rendered output
+
+With **Link Files in Rendered Output** checked in Session Settings (the default), each completed reply is prepared for Rendered without any model: file references that resolve to a readable file become links, and referenced images get inline previews. References resolve against the workspace; a bare file name or partial path such as `MainWindow.xaml` links when exactly one workspace file matches, skipping build and tool folders such as `bin`, `obj`, and `.git`. Code blocks, inline code that is not a path, existing links, and URLs are left as written, and Raw is unchanged.
+
+## Changing a running session
+
+**Session -> Settings** also changes a running session. The model, reasoning effort, Standard/Plan/Autopilot mode, and file-link setting apply to the running session, which keeps its conversation. Changes requested during a turn wait until that turn ends, or apply just before your next prompt if you interrupt it; choosing the running settings again withdraws a waiting change. Other changes start a new session: the service, endpoint, or key; instruction or skill loading; a custom agent mode; or a different context window for a BYOK model.
+
+When the replaced session has a conversation, a confirmation offers to carry it forward. The current session model writes a hand-off summary, and your opening request and four most recent requests are quoted exactly, so constraints you stated are not lost to summarizing. The context accompanies the first prompt of the new session; it does not trigger autonomous work or appear in the transcript. Declining starts fresh.
 
 ## Customization and permissions
 
@@ -30,26 +40,11 @@ Original transcripts, prepared rendered transcripts, and metadata are stored und
 
 ## Local Mediator
 
-**Session -> Mediator** lists text models compatible with the installed local execution providers. The preferred model is `phi-3.5-mini`. **Download Model** caches a model before it can be enabled; **Prepare Acceleration** installs available GPU/NPU execution providers and refreshes the catalog. CPU execution is available without that optional preparation.
+The Mediator is an on-device language model, currently parked for a future purpose. It is off by default, and settings saved by earlier versions load it disabled. It never changes what is sent to the session model or shown in chat.
 
-Options are opt-in and saved only on **OK**. Downloads are retained when the dialog is canceled. Editable instructions and task skills live under `%LOCALAPPDATA%\TurboPilot\mediator`; **Open Configuration Folder** opens them for an external editor. Unedited copies are refreshed when a newer default ships; edited files are never overwritten. `defaults.json` in that folder records which default each copy came from.
+**Session -> Mediator** lists text models compatible with the installed local execution providers; the preferred model is `phi-3.5-mini`. **Download Model** caches a model before it can be enabled, and **Prepare Acceleration** installs available GPU/NPU execution providers and refreshes the catalog. CPU execution is available without that optional preparation. Options are saved only on **OK**, and downloads are kept when the dialog is canceled.
 
-The Mediator runs entirely on-device through the embedded Foundry Local SDK, without a local HTTP server or API key. Its options apply to the running session on OK:
-
-| Option | Behavior |
-| --- | --- |
-| Reword Prompts | Removes redundant wording from prompts of at least 100 locally counted tokens (`minimumRewriteTokens` in `settings.json`); shorter prompts are sent unchanged. Rewrites must use fewer tokens and preserve protected paths, numbers, literals, negations, and ordering words such as before, after, until, and yet, compared as whole words; otherwise the original is sent. |
-| Beautify Output | Prepares Rendered with validated file links and permitted local image previews, even when the local model is unavailable. The local model is asked only about each turn's final response, and only when a plain standalone line could become a heading; earlier messages in the turn receive links only. Raw remains unchanged. Code and existing links are preserved. |
-| Maintain Summary | Updates a concise summary once per completed turn and on demand, batching the turn's prompts, answers, and responses into as few local calls as possible. Answers are recorded with their question; permission replies and tool-request messages without text are not. Tool results are kept as bounded excerpts in the worklog but are not summarized. Superseded decisions are replaced in the summary, not erased from history. |
-| Monitor Output | Reviews each turn's final response against the latest request, the most recent summary, and short excerpts of that request's tool results, reporting possible repetition, contradictions, or unsupported claims with an excerpt. Warnings without an exact response excerpt are discarded. These are review hints, not proof of a hallucination. |
-| Raw diagnostics | Shows local requests and responses in Raw only. They are not forwarded to the session model, written to its transcript, or shown in Rendered. |
-
-The fixed local o200k tokenizer provides a consistent reduction comparison, not an exact billing estimate for every provider. Every local operation has a bounded context/output budget of at most 4,096 locally counted tokens, even when a model advertises a larger window, and a default 60-second timeout, including at most one correction of an invalid response schema. Content too large for the budget is skipped without counting as a failure. A failure retains original chat text and reports the problem below the input box and in the status line. Three consecutive failures disable local inference until options are reapplied or a new session starts. Stop and End Session cancel local work as well as the active remote turn; a new prompt cancels it only when interrupting a turn or when the prompt will be reworded.
-
-**Session -> Mediator Summary** displays the current restart summary on demand. When Begin Session changes parameters in the same workspace, a separate confirmation offers to carry the summary forward. Accepted context is attached after the new session starts and accompanies its first user prompt; it does not trigger autonomous work or a synthetic visible conversation. Declining starts without the summary. Stale or unavailable summaries are not silently used.
-
-Original worklog entries and summary state are stored under `%LOCALAPPDATA%\TurboPilot\workspaces\<workspace-key>\sessions\<session-id>`. The model cache and local runtime logs are under `%LOCALAPPDATA%\TurboPilot\foundry`. Turning the Mediator off does not stop conversation/worklog recording.
-
+When enabled, the Mediator records prompts, answers to model questions, replies, and short tool-result excerpts in a local worklog under `%LOCALAPPDATA%\TurboPilot\workspaces\<workspace-key>\sessions\<session-id>`. Permission replies and messages that only request tools are not recorded, and nothing is recorded while it is disabled. **Show Mediator diagnostics in Raw only** displays local model requests and responses in Raw; none are made by this version. Local calls use a practical budget of 4,096 locally counted tokens and a default 60-second timeout, and three consecutive failures disable local inference until the options are applied again. The model cache and local runtime logs are under `%LOCALAPPDATA%\TurboPilot\foundry`.
 ## Build
 
 Windows and the .NET 9 SDK or later are required. WebView2 Runtime is required for rendered output.
@@ -77,4 +72,4 @@ The optional `--cloud` check sends one short synthetic prompt through the authen
 
 `--ui-close` exercises the real exit-confirmation and cleanup paths without the other desktop flows.
 
-`--mediator-chat` runs the mediated runtime checks alone. `--mediator-native` queries compatible on-device models and exercises the default model if it is cached. Add `--download-mediator` to explicitly download that model first; the model stays cached for later use. The native check includes generation cancellation and all four processing contracts.
+`--session-features` runs the file-link, live-change, hand-off, and Mediator capture checks alone. `--mediator-native` queries compatible on-device models and exercises the default model if it is cached. Add `--download-mediator` to explicitly download that model first; the model stays cached for later use. The native check includes generation cancellation and a generation through the parked Mediator.

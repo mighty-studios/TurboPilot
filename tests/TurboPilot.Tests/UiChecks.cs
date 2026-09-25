@@ -77,7 +77,6 @@ internal static class UiChecks
 					Path.Combine(workspace.Root, "browser"), runtime,
 					new MediatorConfiguration(Path.Combine(workspace.Root, "mediator")),
 					(id, folder) => new MediatorService(id, folder, new MediatorSettings(), runtime,
-						new MediatorConfiguration(Path.Combine(workspace.Root, "mediator")),
 						new MediationStore(id, folder, Path.Combine(workspace.Root, "worklogs"))));
 				TurbolandTheme.Wpf.TurbolandTheme.ApplyTo(window);
 				var closed = false;
@@ -189,12 +188,12 @@ internal static class UiChecks
 		using var workspace = new TestWorkspace();
 		await using var provider = new LocalProvider();
 		var library = workspace.CreateLibrary();
-		var localRuntime = MediatedChatChecks.CreateRuntime();
+		var localRuntime = new FakeLocalRuntime();
 		var localConfiguration = new MediatorConfiguration(Path.Combine(workspace.Root, "window-mediator"));
 		TurbolandTheme.Wpf.TurbolandTheme.Apply(application, TurbolandTheme.Core.ThemeMode.Authentic);
 		var window = new MainWindow(workspace.Store, workspace.CreateChat, _ => library, Path.Combine(workspace.Root, "browser"),
 			localRuntime, localConfiguration, (id, folder) => new MediatorService(id, folder, localConfiguration.Load(),
-				localRuntime, localConfiguration, new MediationStore(id, folder, Path.Combine(workspace.Root, "worklogs"))));
+				localRuntime, new MediationStore(id, folder, Path.Combine(workspace.Root, "worklogs"))));
 		TurbolandTheme.Wpf.TurbolandTheme.ApplyTo(window);
 		var options = new ChatSessionOptions
 		{
@@ -304,7 +303,7 @@ internal static class UiChecks
 			Check.True(!window.IsSessionActive && Field<ChatService?>(window, "_chat") is null, "Ending during startup must not leave a late session behind.");
 			Check.Equal("Start or resume a session to begin.", Status(window), "Return to the initial state after canceling startup");
 			Console.WriteLine("PASS ending during startup without a ghost session");
-			await CheckMediatedWindowAsync(application, window, workspace, provider, options, localConfiguration);
+			await CheckSessionWindowAsync(application, window, workspace, provider, options);
 			Check.Equal(0, provider.Errors.Count, "The UI provider must not hide request failures");
 		}
 		finally
@@ -322,84 +321,74 @@ internal static class UiChecks
 		}
 	}
 
-	private static async Task CheckMediatedWindowAsync(Application application, MainWindow window, TestWorkspace workspace,
-		LocalProvider provider, ChatSessionOptions options, MediatorConfiguration configuration)
+	private static async Task CheckSessionWindowAsync(Application application, MainWindow window, TestWorkspace workspace,
+		LocalProvider provider, ChatSessionOptions options)
 	{
 		workspace.Write("workspace\\README.md", "Fixture document.");
-		configuration.Save(new MediatorSettings { Enabled = true });
 		await InvokeTask(window, "StartChatAsync", options, null);
 		provider.Replies.Enqueue(new LocalProvider.Reply("Results\r\n\r\nUpdated `README.md`."));
-		SetInput(window, "Please kindly summarize README.md.");
+		SetInput(window, "Please summarize README.md.");
 		Click(window, "buttonSend");
 		await Check.UntilAsync(() => Status(window).StartsWith("Ready..") && window.RenderedText.Contains("kp-path:"),
-			"The mediated UI response did not finish.");
-		Check.True(window.OutputText.Contains("Please kindly") && !window.OutputText.Contains("kp-path:"), "Raw must preserve the original exchange.");
-		Check.True(!window.OutputText.Contains("[mediator") && !window.RenderedText.Contains(MediatedChatChecks.SummaryMarker), "Keep local processing hidden by default.");
+			"The linked UI response did not finish.");
+		Check.True(window.OutputText.Contains("Updated `README.md`.") && !window.OutputText.Contains("kp-path:"), "Raw must preserve the original reply.");
 		var chat = Field<ChatService>(window, "_chat");
-		var summaryShown = false;
-		using (var timer = DialogAction<SummaryDialog>(application, dialog =>
-		{
-			summaryShown = true;
-			Check.True(Control<TextBox>(dialog, "textSummary").Text.Contains(MediatedChatChecks.SummaryMarker), "Show the summary on demand.");
-			Invoke(dialog, "OnClose", dialog, new RoutedEventArgs());
-		}))
-		{
-			Control<MenuItem>(window, "menuSummary").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
-			await Check.UntilAsync(() => summaryShown && !application.Windows.OfType<SummaryDialog>().Any(), "The summary viewer did not close.");
-		}
+		var sessionId = chat.SessionId;
 
-		using (var timer = DialogAction<MediatorDialog>(application, dialog =>
-		{
-			Control<CheckBox>(dialog, "checkDebug").IsChecked = true;
-			Click(dialog, "buttonOk");
-		}))
-			Control<MenuItem>(window, "menuMediator").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
-		await Check.UntilAsync(() => chat.DebugRaw, "The debug option was not applied.");
-		provider.Replies.Enqueue(new LocalProvider.Reply("Another plain reply."));
-		SetInput(window, "Please kindly continue.");
-		Click(window, "buttonSend");
-		await Check.UntilAsync(() => Status(window).StartsWith("Ready..") && window.OutputText.Contains("[mediator"),
-			"Optional raw diagnostics did not appear.");
-		Check.True(!window.RenderedText.Contains("[mediator") && !window.RenderedText.Contains(MediatedChatChecks.SummaryMarker), "Never mirror raw-only diagnostics to Rendered.");
+		var live = options with { Model = "test-model-two" };
+		await InvokeTask(window, "StartFromSettingsAsync", live with { Mode = "Plan" });
+		Check.True(ReferenceEquals(chat, Field<ChatService>(window, "_chat")) && chat.SessionId == sessionId, "Keep the session for a live change.");
+		await Check.UntilAsync(() => window.OutputText.Contains("--- Changed to test-model-two | Plan ---")
+			&& Control<TextBlock>(window, "sessionInfo").Text.StartsWith("test-model-two"),
+			"Show the live change in the transcript and the session badge.");
+		await InvokeTask(window, "StartFromSettingsAsync", live);
+		Check.True(Status(window).StartsWith("Ready.."), "Return to Ready after a live change.");
 
-		var changed = options with { Model = "test-model-two" };
-		Check.True(MainWindow.ShouldOfferBootstrap(options, changed), "Offer bootstrap on a same-workspace model change.");
-		Check.True(!MainWindow.ShouldOfferBootstrap(options, options), "Do not offer bootstrap when parameters are unchanged.");
-		Check.True(!MainWindow.ShouldOfferBootstrap(options, changed with { WorkspaceFolder = workspace.Root }), "Do not offer another workspace's summary.");
+		var restart = live with { ApplyInstructions = false };
+		provider.Replies.Enqueue(SessionFeatureChecks.HandoffReply());
 		using (var timer = DialogAction<YesNoDialog>(application, dialog => Invoke(dialog, "OnYes", dialog, new RoutedEventArgs())))
-			await InvokeTask(window, "StartFromSettingsAsync", changed);
+			await InvokeTask(window, "StartFromSettingsAsync", restart);
 		var restarted = Field<ChatService>(window, "_chat");
-		Check.True(restarted.Record!.BootstrapPending && restarted.Record.Bootstrap is not null, "Attach the summary only after restart consent.");
-		Check.True(!window.OutputText.Contains(MediatedChatChecks.SummaryMarker), "Do not display bootstrap context as a user prompt.");
+		Check.True(!ReferenceEquals(chat, restarted) && restarted.Record!.BootstrapPending
+			&& restarted.Record.Bootstrap!.Summary.Contains(SessionFeatureChecks.HandoffMarker), "Attach the hand-off after restart consent.");
+		Check.True(!window.OutputText.Contains(SessionFeatureChecks.HandoffMarker), "Do not display hand-off context.");
 		provider.Replies.Enqueue(new LocalProvider.Reply("Restarted with context."));
 		SetInput(window, "Continue after restart.");
 		Click(window, "buttonSend");
 		await Check.UntilAsync(() => Status(window).StartsWith("Ready..") && window.RenderedText.Contains("Restarted with context."),
 			"The restarted model did not continue.");
-		Check.True(provider.Requests.Last().GetRawText().Contains(MediatedChatChecks.SummaryMarker), "Pass the accepted summary to the new model.");
-		using (var timer = DialogAction<YesNoDialog>(application, dialog => Invoke(dialog, "OnNo", dialog, new RoutedEventArgs())))
-			await InvokeTask(window, "StartFromSettingsAsync", options);
-		Check.True(Field<ChatService>(window, "_chat").Record!.Bootstrap is null, "Declining the summary must start without it.");
-		var current = Field<ChatService>(window, "_chat");
-		Field<IMediatorSession>(current, "_mediator").Capture("user", "Pending context for a canceled restart.");
-		var runtime = (FakeLocalRuntime)Field<ILocalModelRuntime>(window, "_localRuntime");
-		var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-		runtime.Generate = async (_, _, token) =>
-		{
-			entered.TrySetResult();
-			await Task.Delay(Timeout.Infinite, token);
-			return new LocalCompletion("");
-		};
-		using (var timer = DialogAction<YesNoDialog>(application, dialog => Invoke(dialog, "OnYes", dialog, new RoutedEventArgs())))
-		{
-			var restarting = InvokeTask(window, "StartFromSettingsAsync", changed);
-			await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-			await Task.WhenAll(window.EndSessionAsync(), restarting).WaitAsync(TimeSpan.FromSeconds(10));
-		}
-		Check.True(!window.IsSessionActive, "End during summary preparation must cancel the pending restart.");
-		Console.WriteLine("PASS Mediator UI rendering, Raw-only debugging, on-demand summary, and restart consent");
-	}
+		var request = provider.Requests.Last().GetRawText();
+		Check.True(request.Contains(SessionFeatureChecks.HandoffMarker) && request.Contains("Please summarize README.md."),
+			"Pass the hand-off and the earlier request to the new model.");
 
+		using (var timer = DialogAction<YesNoDialog>(application, dialog => Invoke(dialog, "OnNo", dialog, new RoutedEventArgs())))
+			await InvokeTask(window, "StartFromSettingsAsync", live);
+		Check.True(Field<ChatService>(window, "_chat").Record!.Bootstrap is null, "Declining the hand-off must start without it.");
+
+		var fresh = Field<ChatService>(window, "_chat");
+		await InvokeTask(window, "StartFromSettingsAsync", restart);
+		Check.True(!ReferenceEquals(fresh, Field<ChatService>(window, "_chat")) && Field<ChatService>(window, "_chat").Record!.Bootstrap is null,
+			"Restart a session without a conversation without offering a hand-off.");
+		provider.Replies.Enqueue(new LocalProvider.Reply("Context for a canceled restart."));
+		SetInput(window, "Give the next session something to carry.");
+		Click(window, "buttonSend");
+		await Check.UntilAsync(() => Status(window).StartsWith("Ready..") && window.OutputText.Contains("Context for a canceled restart."),
+			"The context turn did not finish.");
+		var held = SessionFeatureChecks.HandoffReply(hold: true);
+		provider.Replies.Enqueue(held);
+		try
+		{
+			using (var timer = DialogAction<YesNoDialog>(application, dialog => Invoke(dialog, "OnYes", dialog, new RoutedEventArgs())))
+			{
+				var restarting = InvokeTask(window, "StartFromSettingsAsync", live);
+				await held.Started.Task.WaitAsync(TimeSpan.FromSeconds(15));
+				await Task.WhenAll(window.EndSessionAsync(), restarting).WaitAsync(TimeSpan.FromSeconds(30));
+			}
+		}
+		finally { held.Release.TrySetResult(); }
+		Check.True(!window.IsSessionActive, "End during hand-off preparation must cancel the pending restart.");
+		Console.WriteLine("PASS UI Rendered links, live session changes, hand-off restart consent, and cancellation");
+	}
 	private static IDisposable DialogAction<T>(Application application, Action<T> action) where T : Window
 	{
 		var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(25) };
@@ -551,7 +540,7 @@ internal static class UiChecks
 		{
 			Control<ComboBox>(canceled, "comboModel").SelectedIndex = 1;
 			Check.True(!Control<Button>(canceled, "buttonOk").IsEnabled, "Require downloading a new model before enabling it.");
-			Control<CheckBox>(canceled, "checkReword").IsChecked = false;
+			Control<CheckBox>(canceled, "checkDebug").IsChecked = false;
 			Invoke(canceled, "OnCancel", canceled, new RoutedEventArgs());
 		};
 		Check.Equal(false, canceled.ShowDialog(window), "Cancel the edited local options");

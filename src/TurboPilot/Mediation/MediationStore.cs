@@ -38,8 +38,7 @@ public sealed class MediationStore
 		var state = JsonSerializer.Deserialize<MediationState>(File.ReadAllText(StatePath), JsonOptions)
 			?? throw new InvalidDataException("The Mediator worklog state is empty.");
 		if (state.SessionId != sessionId || !SameWorkspace(state.Workspace, workspace)
-			|| state.Entries is null || state.Entries.Where((entry, index) => entry is null || entry.Sequence != index + 1).Any()
-			|| state.SummaryThrough < 0 || state.SummaryThrough > state.Entries.Count)
+			|| state.Entries is null || state.Entries.Where((entry, index) => entry is null || entry.Sequence != index + 1).Any())
 			throw new InvalidDataException("The Mediator worklog does not match this session.");
 		return state;
 	}
@@ -56,8 +55,6 @@ public sealed class MediationStore
 			if (entry.Interrupted) text.Append(" (interrupted)");
 			text.Append("\r\n\r\n").Append(entry.Content).Append("\r\n");
 		}
-		if (!string.IsNullOrWhiteSpace(state.Summary))
-			text.Append("\r\n## Summary\r\n\r\n").Append(state.Summary).Append("\r\n");
 		AtomicFile.Write(WorklogPath, stream =>
 		{
 			using var writer = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true);

@@ -66,7 +66,7 @@ internal sealed class LocalProvider : IAsyncDisposable
 			if (context.Request.Url!.AbsolutePath.EndsWith("/models"))
 			{
 				context.Response.ContentType = "application/json";
-				await WriteAsync(context.Response, """{"data":[{"id":"test-model","max_context_window":32768}]}""");
+				await WriteAsync(context.Response, """{"data":[{"id":"test-model","max_context_window":32768},{"id":"test-model-two","max_context_window":65536}]}""");
 				return;
 			}
 			using var reader = new StreamReader(context.Request.InputStream);
@@ -76,9 +76,23 @@ internal sealed class LocalProvider : IAsyncDisposable
 			if (!Replies.TryDequeue(out reply))
 				throw new InvalidOperationException("The provider received an unscripted request.");
 			reply.Started.TrySetResult();
+			var id = "fixture-" + Guid.NewGuid().ToString("N");
+			// Some runtime requests, such as hand-off summaries, ask for one complete JSON response.
+			if (!request.TryGetProperty("stream", out var stream) || stream.ValueKind != JsonValueKind.True)
+			{
+				if (reply.Hold)
+					await reply.Release.Task.WaitAsync(_stopping.Token);
+				context.Response.ContentType = "application/json";
+				await WriteAsync(context.Response, JsonSerializer.Serialize(new
+				{
+					id, @object = "chat.completion", created = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), model = "test-model",
+					choices = new[] { new { index = 0, message = new { role = "assistant", content = reply.Text }, finish_reason = "stop" } },
+					usage = new { prompt_tokens = 2048, completion_tokens = 10, total_tokens = 2058 },
+				}));
+				return;
+			}
 			context.Response.ContentType = "text/event-stream";
 			context.Response.SendChunked = true;
-			var id = "fixture-" + Guid.NewGuid().ToString("N");
 
 			async Task Chunk(object delta, string? finishReason = null) => await WriteAsync(context.Response,
 				"data: " + JsonSerializer.Serialize(new
@@ -134,7 +148,9 @@ internal sealed class LocalProvider : IAsyncDisposable
 		}
 		finally
 		{
-			context.Response.Close();
+			// A response still open when the provider stops cannot be closed on the released listener.
+			try { context.Response.Close(); }
+			catch (Exception ex) when (_stopping.IsCancellationRequested && ex is ObjectDisposedException or HttpListenerException) { }
 		}
 	}
 

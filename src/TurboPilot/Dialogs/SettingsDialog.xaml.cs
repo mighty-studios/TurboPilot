@@ -58,6 +58,11 @@ public partial class SettingsDialog : TurbolandFloatingDialog
 
 	public bool PreloadSkills { get; private set; } = true;
 
+	public bool LinkFiles { get; private set; } = true;
+
+	/// <summary>The chosen session options. Valid after Begin Session.</summary>
+	public ChatSessionOptions? Result { get; private set; }
+
 	// The models returned by the last successful query, in display order.
 	private IReadOnlyList<AvailableModel> _models = Array.Empty<AvailableModel>();
 
@@ -71,9 +76,10 @@ public partial class SettingsDialog : TurbolandFloatingDialog
 	// The workspace whose permissions are in force, or null for app defaults.
 	private readonly string? _activeWorkspacePath;
 
-	// True when a session is already running, so Begin Session replaces it
-	// and the confirmation can warn that the current one ends.
-	private readonly bool _sessionActive;
+	// The running session's options, or null when none is running. Begin Session either applies
+	// the changes to it or replaces it, and the confirmation says which.
+	private readonly ChatSessionOptions? _currentSession;
+	private bool _sessionActive => _currentSession is not null;
 
 	// Ink used for query error messages.
 	private static readonly Brush ErrorBrush =
@@ -82,10 +88,10 @@ public partial class SettingsDialog : TurbolandFloatingDialog
 	private static readonly Brush DefaultStatusBrush =
 		new SolidColorBrush(Color.FromRgb(148, 148, 148));
 
-	public SettingsDialog(string? activeWorkspacePath, bool sessionActive)
+	public SettingsDialog(string? activeWorkspacePath, ChatSessionOptions? currentSession)
 	{
 		_activeWorkspacePath = activeWorkspacePath;
-		_sessionActive = sessionActive;
+		_currentSession = currentSession;
 		InitializeComponent();
 
 		var settings = Settings.Load();
@@ -105,6 +111,7 @@ public partial class SettingsDialog : TurbolandFloatingDialog
 
 		checkApplyInstructions.IsChecked = settings.ApplyInstructions;
 		checkPreloadSkills.IsChecked = settings.PreloadSkills;
+		checkLinkFiles.IsChecked = settings.LinkFiles;
 
 		PopulateModes(settings.SelectedMode);
 		UpdateServiceFields();
@@ -371,36 +378,49 @@ public partial class SettingsDialog : TurbolandFloatingDialog
 			return;
 		}
 
+		var modelIndex = comboModel.SelectedIndex;
+		var hasModel = modelIndex >= 0 && modelIndex < _models.Count;
+		var next = new ChatSessionOptions
+		{
+			WorkspaceFolder = workspace,
+			Model = hasModel ? _models[modelIndex].Id : "",
+			ContextWindowTokens = hasModel ? _models[modelIndex].ContextWindowTokens : 0,
+			ReasoningEffort = comboEffort.SelectedItem as string ?? "",
+			Mode = comboMode.SelectedItem as string ?? "Standard",
+			UseByok = IsByok,
+			ByokEndpoint = IsByok && TryBuildEndpoint(out var endpoint, out _) ? endpoint : ByokEndpoint,
+			ByokApiKey = textBoxApiKey.Text.Trim(),
+			ApplyInstructions = checkApplyInstructions.IsChecked == true,
+			PreloadSkills = checkPreloadSkills.IsChecked == true,
+			LinkFiles = checkLinkFiles.IsChecked == true,
+		};
+
 		// Starting a session is a deliberate act, so it is confirmed rather
 		// than taken as a side effect of closing the settings. Declining
 		// leaves the dialog open and untouched: the choices stay editable and
 		// nothing has been persisted or connected.
-		var question = _sessionActive
-			? "Start a new session? The current session will end."
-			: "Start a new session?";
+		var change = _currentSession is null ? SessionChange.Fresh : SessionChanges.Classify(_currentSession, next);
+		var question = change == SessionChange.Live
+			? "Apply these changes to the current session? Its conversation continues."
+			: _sessionActive ? "Start a new session? The current session will end." : "Start a new session?";
 		if (!YesNoDialog.Ask(this, question, "Session"))
 			return;
 
 		WorkspacePath = workspace;
 		Provider = IsByok ? "Byok" : "CopilotCli";
-		if (IsByok && TryBuildEndpoint(out var endpoint, out _))
-			ByokEndpoint = endpoint;
-		ByokApiKey = textBoxApiKey.Text.Trim();
-
-		var modelIndex = comboModel.SelectedIndex;
-		SelectedModel = modelIndex >= 0 && modelIndex < _models.Count
-			? _models[modelIndex].Id
-			: "";
-		SelectedContextWindowTokens = modelIndex >= 0 && modelIndex < _models.Count
-			? _models[modelIndex].ContextWindowTokens
-			: 0;
-		SelectedEffort = comboEffort.SelectedItem as string ?? "";
-		SelectedMode = comboMode.SelectedItem as string ?? "Standard";
-		ApplyInstructions = checkApplyInstructions.IsChecked == true;
-		PreloadSkills = checkPreloadSkills.IsChecked == true;
+		ByokEndpoint = next.ByokEndpoint;
+		ByokApiKey = next.ByokApiKey;
+		SelectedModel = next.Model;
+		SelectedContextWindowTokens = next.ContextWindowTokens;
+		SelectedEffort = next.ReasoningEffort ?? "";
+		SelectedMode = next.Mode;
+		ApplyInstructions = next.ApplyInstructions;
+		PreloadSkills = next.PreloadSkills;
+		LinkFiles = next.LinkFiles;
 
 		Persist();
 
+		Result = next;
 		BeginRequested = true;
 		Close(true);
 	}
@@ -429,6 +449,7 @@ public partial class SettingsDialog : TurbolandFloatingDialog
 		settings.SelectedMode = SelectedMode;
 		settings.ApplyInstructions = ApplyInstructions;
 		settings.PreloadSkills = PreloadSkills;
+		settings.LinkFiles = LinkFiles;
 		settings.Save();
 	}
 

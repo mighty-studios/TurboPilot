@@ -159,7 +159,6 @@ public partial class MainWindow : TurbolandWindow
 		menuPastSessions.IsEnabled = !_sessionChanging && !_closing;
 		menuSettings.IsEnabled = !_sessionChanging && !_closing;
 		menuMediator.IsEnabled = !_sessionChanging && !_closing;
-		menuSummary.IsEnabled = ready && _chat?.SummaryEnabled == true;
 
 		richTextBoxInput.IsEnabled = ready;
 		UpdateHistoryButtons();
@@ -750,25 +749,11 @@ public partial class MainWindow : TurbolandWindow
 	{
 		try
 		{
-			var dialog = new Dialogs.SettingsDialog(ActiveWorkspacePath, IsSessionActive);
+			var dialog = new Dialogs.SettingsDialog(ActiveWorkspacePath, IsSessionActive ? _chat?.RequestedOptions : null);
 			dialog.ShowDialog(this);
 
-			if (dialog.BeginRequested && !string.IsNullOrEmpty(dialog.WorkspacePath))
-			{
-				await StartFromSettingsAsync(new ChatSessionOptions
-				{
-					WorkspaceFolder = dialog.WorkspacePath,
-					Model = dialog.SelectedModel,
-					ReasoningEffort = dialog.SelectedEffort,
-					Mode = dialog.SelectedMode,
-					ContextWindowTokens = dialog.SelectedContextWindowTokens,
-					UseByok = dialog.Provider == "Byok",
-					ByokEndpoint = dialog.ByokEndpoint,
-					ByokApiKey = dialog.ByokApiKey,
-					ApplyInstructions = dialog.ApplyInstructions,
-					PreloadSkills = dialog.PreloadSkills,
-				});
-			}
+			if (dialog.BeginRequested && dialog.Result is { WorkspaceFolder.Length: > 0 } options)
+				await StartFromSettingsAsync(options);
 		}
 		catch (Exception ex)
 		{
@@ -784,20 +769,35 @@ public partial class MainWindow : TurbolandWindow
 		SetSessionActive(IsSessionActive);
 		try
 		{
-			SummaryBootstrap? bootstrap = null;
-			if (_chat is { SummaryEnabled: true } current && ShouldOfferBootstrap(current.Options, options)
-				&& YesNoDialog.Ask(this, "Use the Mediator summary as context for the new session?", "Restart Context"))
+			var current = IsSessionActive ? _chat : null;
+			var change = current is null ? SessionChange.Fresh : SessionChanges.Classify(current.RequestedOptions, options);
+			if (change == SessionChange.Live)
 			{
 				try
 				{
-					bootstrap = await current.GetRestartSummaryAsync(cancellation.Token);
-					cancellation.Token.ThrowIfCancellationRequested();
-					if (bootstrap is null)
-						MessageDialog.Ok(this, "No up-to-date summary is available. The new session will start without one.", "Mediator");
+					if (await current!.ApplyLiveChangesAsync(options, cancellation.Token))
+						ShowNotice("The changes apply when the current turn ends.");
 				}
 				catch (Exception ex) when (ex is not OperationCanceledException)
 				{
-					MessageDialog.Ok(this, "Cannot prepare restart context: " + ex.Message + "\r\nThe new session will start without it.", "Mediator");
+					AppendOutput($"\r\n[error] Cannot apply the changes to the running session: {ex.Message}\r\n\r\n");
+				}
+				return;
+			}
+			SummaryBootstrap? bootstrap = null;
+			if (change == SessionChange.Restart && current!.HasConversation
+				&& YesNoDialog.Ask(this, "Carry a summary of this session into the new one?", "Restart Context"))
+			{
+				try
+				{
+					bootstrap = await current.PrepareHandoffAsync(cancellation.Token);
+					cancellation.Token.ThrowIfCancellationRequested();
+					if (bootstrap is null)
+						MessageDialog.Ok(this, "The session has nothing to carry over. The new session will start without context.", "Restart Context");
+				}
+				catch (Exception ex) when (ex is not OperationCanceledException)
+				{
+					MessageDialog.Ok(this, "Cannot prepare the hand-off: " + ex.Message + "\r\nThe new session will start without it.", "Restart Context");
 				}
 			}
 			cancellation.Token.ThrowIfCancellationRequested();
@@ -811,14 +811,6 @@ public partial class MainWindow : TurbolandWindow
 			RefreshChatState();
 		}
 	}
-
-	internal static bool ShouldOfferBootstrap(ChatSessionOptions current, ChatSessionOptions next) =>
-		!string.IsNullOrWhiteSpace(current.WorkspaceFolder)
-		&& MediationStore.SameWorkspace(current.WorkspaceFolder, next.WorkspaceFolder)
-		&& (current.Model != next.Model || current.ReasoningEffort != next.ReasoningEffort || current.Mode != next.Mode
-			|| current.UseByok != next.UseByok || current.ByokEndpoint != next.ByokEndpoint || current.ByokApiKey != next.ByokApiKey
-			|| current.ApplyInstructions != next.ApplyInstructions || current.PreloadSkills != next.PreloadSkills
-			|| current.ContextWindowTokens != next.ContextWindowTokens);
 
 	/// <summary>
 	/// Session menu: ends the active session.
@@ -892,16 +884,16 @@ public partial class MainWindow : TurbolandWindow
 
 			var chat = _createChat();
 			chat.MediatorFactory ??= _createMediator ?? ((id, workspace) => new MediatorService(
-				id, workspace, _mediatorConfiguration.Load(), _localRuntime, _mediatorConfiguration));
+				id, workspace, _mediatorConfiguration.Load(), _localRuntime));
 			_chat = chat;
 			chat.TranscriptReceived += text => ForActiveChat(chat, () => AppendRawOutput(text));
 			chat.RenderedReceived += text => ForActiveChat(chat, () => AppendRenderedOutput(text));
 			chat.RenderedReplaced += text => ForActiveChat(chat, () => ReplaceRenderedOutput(text));
-			chat.MediatorNoticeReceived += text => ForActiveChat(chat, () => ShowMediatorNotice(text));
+			chat.NoticeReceived += text => ForActiveChat(chat, () => ShowNotice(text));
 			chat.MediatorDiagnosticReceived += diagnostic => ForActiveChat(chat, () =>
 			{
 				if (chat.DebugRaw)
-					AppendRawOutput($"\r\n[mediator {diagnostic.Operation}]\r\nInput: {diagnostic.Input}\r\nOutput: {diagnostic.Output}\r\n{diagnostic.Note}\r\n");
+					AppendRawOutput($"\r\n[mediator {diagnostic.Purpose}]\r\nInput: {diagnostic.Input}\r\nOutput: {diagnostic.Output}\r\n{diagnostic.Note}\r\n");
 			});
 			chat.ErrorReceived += text => ForActiveChat(chat, () => AppendOutput($"\r\n[error] {text}\r\n\r\n"));
 			chat.StateChanged += () => ForActiveChat(chat, RefreshChatState);
@@ -932,7 +924,7 @@ public partial class MainWindow : TurbolandWindow
 			if (bootstrap is not null)
 			{
 				chat.SetBootstrap(bootstrap);
-				ShowMediatorNotice("The previous summary will accompany the next prompt as background context.");
+				ShowNotice("Context from the previous session will accompany your next prompt.");
 			}
 
 			cancellation.Token.ThrowIfCancellationRequested();
@@ -980,7 +972,6 @@ public partial class MainWindow : TurbolandWindow
 	{
 		_statusBase = _sessionChanging ? "Starting.."
 			: _chat?.HasPendingQuestion == true ? "Waiting.."
-			: _chat?.IsMediating == true ? "Mediating.."
 			: _chat?.IsWorking == true ? "Working.." : "Ready..";
 		SetSessionActive(_chat is not null);
 	}
@@ -1203,32 +1194,18 @@ public partial class MainWindow : TurbolandWindow
 				{
 					if (!chat.DebugRaw)
 						ReplaceRawOutput(chat.Transcript);
-					ShowMediatorNotice(options.Enabled ? "Mediator options applied." : "Mediator disabled; original chat is preserved.");
+					ShowNotice(options.Enabled ? "Mediator: enabled; it records this conversation locally." : "Mediator: disabled.");
 				});
 			}
 		}
 		catch (Exception ex) { MessageDialog.Ok(this, "Cannot open Mediator settings: " + ex.Message, "Mediator"); }
 	}
 
-	private void ShowMediatorNotice(string text)
+	private void ShowNotice(string text)
 	{
-		mediatorNotice.Text = "Mediator: " + text;
-		mediatorNotice.ToolTip = mediatorNotice.Text;
+		mediatorNotice.Text = text;
+		mediatorNotice.ToolTip = text;
 		mediatorNotice.Visibility = Visibility.Visible;
-	}
-
-	private async void OnMediatorSummary(object sender, RoutedEventArgs e)
-	{
-		if (_chat is not { } chat) return;
-		try
-		{
-			if (chat.IsWorking && !YesNoDialog.Ask(this, "Stop the current work and prepare an up-to-date summary?", "Mediator"))
-				return;
-			var summary = await chat.GetRestartSummaryAsync();
-			if (ReferenceEquals(_chat, chat))
-				new SummaryDialog(summary?.Summary ?? "No up-to-date summary is available.").ShowDialog(this);
-		}
-		catch (Exception ex) { ShowMediatorNotice("Cannot prepare the summary: " + ex.Message); }
 	}
 
 	// -- Exit ------------------------------------------------------------------

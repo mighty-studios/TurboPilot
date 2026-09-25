@@ -23,19 +23,14 @@
 		</GroupBox>
 		<GroupBox Header="Options" Margin="0,10,0,0">
 			<StackPanel>
-				<CheckBox x:Name="checkReword" Content="Reword Prompts" ToolTip="Reduce prompt length while preserving meaning."/>
-				<CheckBox x:Name="checkBeautify" Content="Beautify Output" Margin="0,4,0,0"
-						ToolTip="Prepare file links, image previews, and formatting for Rendered output."/>
-				<CheckBox x:Name="checkSummary" Content="Maintain Summary" Margin="0,4,0,0"
-						ToolTip="Maintain concise context for a same-workspace restart."/>
-				<CheckBox x:Name="checkMonitor" Content="Monitor Output" Margin="0,4,0,0"
-						ToolTip="Warn about possible repetition, contradictions, or unsupported claims."/>
+				<TextBlock TextWrapping="Wrap" MaxWidth="710"
+						Text="The Mediator is parked for a future purpose. When enabled, it records prompts, answers, replies, and tool results in a local worklog. It never changes what is sent or shown."/>
 				<CheckBox x:Name="checkDebug" Content="Show Mediator diagnostics in Raw only" Margin="0,8,0,0"
-						ToolTip="Show local requests and responses without sending them to the session model or Rendered output."/>
+						ToolTip="Show local model requests and responses without sending them to the session model or Rendered output."/>
 			</StackPanel>
 		</GroupBox>
 		<TextBlock x:Name="textStatus" Margin="0,10,0,0" TextWrapping="Wrap" MaxWidth="710"/>
-		<TextBlock Text="Options apply on OK. Downloads are kept. Instructions and skills can be edited externally."
+		<TextBlock Text="Options apply on OK. Downloads are kept."
 				Margin="0,8,0,0" TextWrapping="Wrap" MaxWidth="710"/>
 		<Grid Margin="0,16,0,0">
 			<Grid.ColumnDefinitions>

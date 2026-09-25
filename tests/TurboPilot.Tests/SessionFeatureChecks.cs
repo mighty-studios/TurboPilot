@@ -1,0 +1,278 @@
+using System.IO;
+using GitHub.Copilot;
+using TurboPilot.Ai;
+using TurboPilot.Mediation;
+using TurboPilot.Permissions;
+using TurboPilot.Sessions;
+
+namespace TurboPilot.Tests;
+
+internal static class SessionFeatureChecks
+{
+	internal const string HandoffMarker = "HANDOFF_SUMMARY_SENTINEL";
+	internal const string OpeningRequest = "Document README.md without changing code.";
+
+	// Hand-off summaries are requested as one complete response in the runtime's tagged format.
+	internal static LocalProvider.Reply HandoffReply(bool hold = false) => new(
+		$"<analysis>Private working notes.</analysis>\n<summary>\n{HandoffMarker}: continue documenting README.md.\n</summary>", Hold: hold);
+
+	public static async Task RunAsync()
+	{
+		using var workspace = new TestWorkspace();
+		await using var provider = new LocalProvider();
+		var options = new ChatSessionOptions
+		{
+			WorkspaceFolder = workspace.Workspace, Model = "test-model", UseByok = true,
+			ByokEndpoint = provider.Endpoint, ContextWindowTokens = 32768,
+		};
+		CheckClassification(workspace, options);
+		await CheckRenderedLinksAsync(workspace, provider, options);
+		await CheckLiveChangesAsync(workspace, provider, options);
+		await CheckHandoffAsync(workspace, provider, options);
+		await CheckMediatorCaptureAsync(workspace, provider, options);
+		Check.Equal(0, provider.Errors.Count, "The loopback provider must not hide failures: " + string.Join(" | ", provider.Errors));
+		Console.WriteLine("PASS session features: Rendered links, live changes, SDK hand-off restarts, and parked Mediator capture");
+	}
+
+	private static void CheckClassification(TestWorkspace workspace, ChatSessionOptions options)
+	{
+		Check.Equal(SessionChange.Fresh, SessionChanges.Classify(options, options), "Unchanged settings start a fresh session");
+		Check.Equal(SessionChange.Fresh, SessionChanges.Classify(options, options with { WorkspaceFolder = workspace.Root }), "Another workspace starts fresh");
+		Check.Equal(SessionChange.Live, SessionChanges.Classify(options, options with { Model = "test-model-two" }), "Switch the model live");
+		Check.Equal(SessionChange.Live, SessionChanges.Classify(options, options with { ReasoningEffort = "low" }), "Change the effort live");
+		Check.Equal(SessionChange.Live, SessionChanges.Classify(options, options with { Mode = "Plan" }), "Change a built-in mode live");
+		Check.Equal(SessionChange.Live, SessionChanges.Classify(options, options with { LinkFiles = false }), "Toggle file links live");
+		Check.Equal(SessionChange.Restart, SessionChanges.Classify(options, options with { Mode = "Writer" }), "A custom agent needs a new session");
+		Check.Equal(SessionChange.Restart, SessionChanges.Classify(options, options with { ApplyInstructions = false }), "Instruction loading needs a new session");
+		Check.Equal(SessionChange.Restart, SessionChanges.Classify(options, options with { ByokEndpoint = "http://127.0.0.1:1/v1" }), "Another endpoint needs a new session");
+		Check.Equal(SessionChange.Restart, SessionChanges.Classify(options, options with { Model = "test-model-two", ContextWindowTokens = 65536 }),
+			"A BYOK context change needs a new session");
+		var copilot = options with { UseByok = false, ByokEndpoint = "", ByokApiKey = "stale" };
+		Check.Equal(SessionChange.Live, SessionChanges.Classify(copilot, copilot with { Model = "other", ContextWindowTokens = 1000, ByokApiKey = "" }),
+			"Copilot sessions ignore BYOK credentials and change the context window live");
+	}
+
+	private static async Task CheckRenderedLinksAsync(TestWorkspace workspace, LocalProvider provider, ChatSessionOptions options)
+	{
+		var readme = workspace.Write("workspace\\README.md", "Fixture file.");
+		var deep = workspace.Write("workspace\\src\\app\\Deep.cs", "Fixture source.");
+		string id, rendered;
+		await using (var chat = workspace.CreateChat())
+		{
+			await chat.StartAsync(options);
+			id = chat.SessionId!;
+			provider.Replies.Enqueue(new LocalProvider.Reply("See README.md and Deep.cs."));
+			await RuntimeChecks.SendAndWaitAsync(chat, "Where is the code?");
+			Check.True(chat.RenderedTranscript.Contains("kp-path:" + Uri.EscapeDataString(readme))
+				&& chat.RenderedTranscript.Contains("kp-path:" + Uri.EscapeDataString(deep)),
+				"Link files mentioned in a reply, including a bare name found in the workspace.");
+			Check.True(chat.Transcript.Contains("See README.md and Deep.cs.") && !chat.Transcript.Contains("kp-path:"), "Keep Raw exactly as the model wrote it.");
+			rendered = chat.RenderedTranscript;
+			Check.Equal(rendered, workspace.Store.ReadRenderedTranscript(id), "Persist linked output separately");
+		}
+		await using (var resumed = workspace.CreateChat())
+		{
+			await resumed.ResumeAsync(id, options);
+			Check.True(resumed.RenderedTranscript.StartsWith(rendered, StringComparison.Ordinal), "Restore linked output on resume.");
+		}
+		await using (var plain = workspace.CreateChat())
+		{
+			await plain.StartAsync(options with { LinkFiles = false });
+			provider.Replies.Enqueue(new LocalProvider.Reply("See README.md."));
+			await RuntimeChecks.SendAndWaitAsync(plain, "Where is it?");
+			Check.True(!plain.RenderedTranscript.Contains("kp-path:"), "Leave Rendered unlinked when file links are off.");
+		}
+	}
+
+	private static async Task CheckLiveChangesAsync(TestWorkspace workspace, LocalProvider provider, ChatSessionOptions options)
+	{
+		await using var chat = workspace.CreateChat();
+		await chat.StartAsync(options);
+		var id = chat.SessionId;
+		provider.Replies.Enqueue(new LocalProvider.Reply("First answer."));
+		await RuntimeChecks.SendAndWaitAsync(chat, "First question.");
+		var changed = options with { Model = "test-model-two", Mode = "Plan", ReasoningEffort = "low" };
+		Check.True(!await chat.ApplyLiveChangesAsync(changed), "Apply changes immediately while idle.");
+		Check.Equal(SessionMode.Plan, await RuntimeChecks.GetSession(chat).Rpc.Mode.GetAsync(), "Switch the runtime mode");
+		Check.True(!await chat.ApplyLiveChangesAsync(changed with { Mode = "Standard" }), "Return to Standard mode immediately.");
+		Check.Equal(SessionMode.Interactive, await RuntimeChecks.GetSession(chat).Rpc.Mode.GetAsync(), "Return the runtime to interactive mode");
+		Check.Equal(id, chat.SessionId, "Keep the session");
+		provider.Replies.Enqueue(new LocalProvider.Reply("Second answer."));
+		await RuntimeChecks.SendAndWaitAsync(chat, "Second question.");
+		var request = provider.Requests.Last();
+		Check.Equal("test-model-two", request.GetProperty("model").GetString(), "Send the next prompt to the switched model");
+		Check.True(request.GetRawText().Contains("First answer."), "Keep the conversation across the switch.");
+		Check.True(chat.Transcript.Contains("--- Changed to test-model-two | Plan ---"), "Record the change in the transcript.");
+		var saved = workspace.Store.Load(id!).Options;
+		Check.True(saved.Model == "test-model-two" && saved.ReasoningEffort == "low" && saved.Mode == "Standard", "Persist the changed settings.");
+		await Check.ThrowsAsync<InvalidOperationException>(() => chat.ApplyLiveChangesAsync(changed with { Mode = "Writer" }));
+
+		// A change requested during a turn must survive an interrupting prompt and a stop.
+		string ModelFor(string prompt) => provider.Requests.Last(sent => sent.GetProperty("messages").EnumerateArray()
+			.Last(message => message.GetProperty("role").GetString() == "user").GetProperty("content").ToString().Contains(prompt))
+			.GetProperty("model").GetString()!;
+		var slow = new LocalProvider.Reply("Slow answer.", Hold: true);
+		provider.Replies.Enqueue(slow);
+		await chat.SendAsync("Long question.");
+		await slow.Started.Task.WaitAsync(TimeSpan.FromSeconds(15));
+		try
+		{
+			Check.True(await chat.ApplyLiveChangesAsync(changed with { Model = "test-model", Mode = "Standard" }), "Hold a change requested during a turn.");
+			Check.Equal("test-model-two", chat.Model, "Keep showing the model that is running");
+			provider.Replies.Enqueue(new LocalProvider.Reply("Interrupting answer."));
+			await chat.SendAsync("Interrupting question.");
+			await Check.UntilAsync(() => chat.Transcript.Contains("Interrupting answer.") && !chat.IsWorking, "The interrupting turn did not finish.");
+		}
+		finally { slow.Release.TrySetResult(); }
+		Check.Equal("test-model", ModelFor("Interrupting question."), "Apply a held change before the interrupting prompt");
+		Check.Equal("test-model", chat.Model, "Show the applied model");
+		var stopped = new LocalProvider.Reply("Stopped answer.", Hold: true);
+		provider.Replies.Enqueue(stopped);
+		await chat.SendAsync("Another long question.");
+		await stopped.Started.Task.WaitAsync(TimeSpan.FromSeconds(15));
+		try
+		{
+			Check.True(await chat.ApplyLiveChangesAsync(changed with { Mode = "Standard" }), "Hold another change requested during a turn.");
+			await chat.AbortAsync().WaitAsync(TimeSpan.FromSeconds(20));
+		}
+		finally { stopped.Release.TrySetResult(); }
+		await Check.UntilAsync(() => chat.Model == "test-model-two", "Apply a held change once a stopped turn is idle.");
+		Check.Equal("test-model-two", (await RuntimeChecks.GetSession(chat).Rpc.Model.GetCurrentAsync()).ModelId, "Switch the runtime model after the stop");
+
+		// Returning to the running settings withdraws a change that is still waiting.
+		var paused = new LocalProvider.Reply("Paused answer.", Hold: true);
+		provider.Replies.Enqueue(paused);
+		await chat.SendAsync("Pause question.");
+		await paused.Started.Task.WaitAsync(TimeSpan.FromSeconds(15));
+		var running = chat.Options;
+		try
+		{
+			Check.True(await chat.ApplyLiveChangesAsync(running with { Model = "test-model" }), "Hold a change during the paused turn.");
+			Check.Equal(SessionChange.Live, SessionChanges.Classify(chat.RequestedOptions, running), "Treat a return to the running settings as a live change");
+			Check.True(!await chat.ApplyLiveChangesAsync(running) && chat.RequestedOptions.Model == running.Model, "Withdraw the waiting change.");
+		}
+		finally { paused.Release.TrySetResult(); }
+		await Check.UntilAsync(() => !chat.IsWorking, "The paused turn did not finish.");
+		await Task.Delay(250);
+		Check.Equal(running.Model, (await RuntimeChecks.GetSession(chat).Rpc.Model.GetCurrentAsync()).ModelId, "Do not apply a withdrawn change");
+	}
+
+	private static async Task CheckHandoffAsync(TestWorkspace workspace, LocalProvider provider, ChatSessionOptions options)
+	{
+		SummaryBootstrap bootstrap;
+		await using (var source = workspace.CreateChat())
+		{
+			await source.StartAsync(options);
+			provider.Replies.Enqueue(new LocalProvider.Reply("Planned."));
+			await RuntimeChecks.SendAndWaitAsync(source, OpeningRequest);
+			provider.Replies.Enqueue(new LocalProvider.Reply("", ToolName: "ask_user",
+				ToolArguments: """{"question":"Which section?","choices":["intro","usage"],"allowFreeform":false}"""));
+			provider.Replies.Enqueue(new LocalProvider.Reply("Usage section chosen."));
+			await source.SendAsync("Step 2.");
+			await Check.UntilAsync(() => source.HasPendingQuestion, "The model question did not wait.");
+			await source.SendAsync("2");
+			await Check.UntilAsync(() => !source.IsWorking && !source.HasPendingQuestion, "The question turn did not finish.");
+			var longRequest = "Step 6. " + new string('x', 2500);
+			foreach (var request in new[] { "Step 3.", "Step 4.", "Step 5.", longRequest })
+			{
+				provider.Replies.Enqueue(new LocalProvider.Reply("Done."));
+				await RuntimeChecks.SendAndWaitAsync(source, request);
+			}
+			var before = provider.Requests.Count;
+			provider.Replies.Enqueue(HandoffReply());
+			bootstrap = await source.PrepareHandoffAsync() ?? throw new InvalidOperationException("The session needs a hand-off.");
+			Check.Equal(before + 1, provider.Requests.Count, "Ask the session model once for the hand-off");
+			Check.True(bootstrap.Summary.StartsWith(HandoffMarker) && !bootstrap.Summary.Contains("Private working notes"),
+				"Carry the summary without the model's working analysis: " + bootstrap.Summary);
+			Check.Equal(5, bootstrap.RecentRequests.Count, "Carry the opening request and the four latest");
+			Check.Equal(OpeningRequest, bootstrap.RecentRequests[0], "Quote the opening request exactly");
+			Check.True(!bootstrap.RecentRequests.Contains("Step 2.") && !bootstrap.RecentRequests.Contains("2"), "Skip older requests and answers to questions.");
+			Check.True(bootstrap.RecentRequests[^1].Length < 2100 && bootstrap.RecentRequests[^1].EndsWith("[...]"), "Bound very long requests.");
+			Check.True(!source.Transcript.Contains(HandoffMarker), "Keep the hand-off out of the conversation.");
+		}
+		await using (var next = workspace.CreateChat())
+		{
+			await next.StartAsync(options with { ApplyInstructions = false });
+			var before = provider.Requests.Count;
+			next.SetBootstrap(bootstrap);
+			Check.Equal(before, provider.Requests.Count, "Attaching context must not trigger model work");
+			Check.True(next.HasConversation && ReferenceEquals(await next.PrepareHandoffAsync(), bootstrap) && provider.Requests.Count == before,
+				"Carry unsent context to a further restart without asking the model.");
+			Check.Throws<InvalidOperationException>(() => next.SetBootstrap(bootstrap with { Workspace = workspace.Root }));
+			provider.Replies.Enqueue(new LocalProvider.Reply("Continued with context."));
+			await RuntimeChecks.SendAndWaitAsync(next, "Continue.");
+			var request = provider.Requests.Last().GetRawText();
+			Check.True(request.Contains(HandoffMarker) && request.Contains(OpeningRequest) && request.Contains("Current user request"),
+				"Send the hand-off and the earlier requests with the first new prompt.");
+			Check.True(!workspace.Store.Load(next.SessionId!).BootstrapPending && !next.Transcript.Contains(HandoffMarker),
+				"Consume the hand-off without showing it.");
+			provider.Replies.Enqueue(HandoffReply());
+			var chained = await next.PrepareHandoffAsync() ?? throw new InvalidOperationException("The continued session needs a hand-off.");
+			Check.True(chained.RecentRequests[0] == OpeningRequest && chained.RecentRequests[^1] == "Continue.",
+				"Keep the original opening request across chained restarts: " + string.Join(" | ", chained.RecentRequests));
+		}
+		Check.Equal("Plain reply.", ChatService.HandoffSummary(" Plain reply. "), "Use an untagged reply as the summary");
+	}
+
+	private static async Task CheckMediatorCaptureAsync(TestWorkspace workspace, LocalProvider provider, ChatSessionOptions options)
+	{
+		var runtime = new FakeLocalRuntime();
+		var worklogs = Path.Combine(workspace.Root, "worklogs");
+		ChatService CreateChat(bool enabled)
+		{
+			var chat = workspace.CreateChat();
+			chat.MediatorFactory = (id, folder) => new MediatorService(id, folder, new MediatorSettings { Enabled = enabled }, runtime,
+				new MediationStore(id, folder, worklogs));
+			return chat;
+		}
+		var scopeKey = PermissionService.MakeKey(workspace.Workspace);
+		var scopes = PermissionService.Current.Workspaces;
+		scopes.TryGetValue(scopeKey, out var originalScope);
+		scopes[scopeKey] = new PermissionScope { Operations = [] };
+		try
+		{
+			await using (var turn = CreateChat(enabled: true))
+			{
+				await turn.StartAsync(options);
+				provider.Replies.Enqueue(new LocalProvider.Reply("Checking `README.md` before answering.", ToolName: "powershell",
+					ToolArguments: """{"command":"Write-Output MediatedToolProbe","description":"Write a fixture marker"}"""));
+				provider.Replies.Enqueue(new LocalProvider.Reply("", ToolName: "ask_user",
+					ToolArguments: """{"question":"Which summary style?","choices":["short","long"],"allowFreeform":false}"""));
+				provider.Replies.Enqueue(new LocalProvider.Reply("Results\r\n\r\nSee `README.md`."));
+				await turn.SendAsync("Review README.md.");
+				await Check.UntilAsync(() => turn.HasPendingQuestion && turn.Transcript.Contains("Permission requested"), "The permission request did not wait.");
+				await turn.SendAsync("1");
+				await Check.UntilAsync(() => turn.HasPendingQuestion && turn.Transcript.Contains("Which summary style?"), "The model question did not wait.");
+				await turn.SendAsync("2");
+				await Check.UntilAsync(() => !turn.IsWorking && !turn.HasPendingQuestion && turn.Transcript.Contains("See `README.md`."),
+					"The agentic turn did not finish.", timeoutSeconds: 30);
+				await turn.WhenRenderedAsync();
+				Check.Equal(0, runtime.Requests.Count, "The parked Mediator only reads the conversation");
+				Check.True(turn.RenderedTranscript.Split("kp-path:").Length - 1 >= 2, "Link files in narration and in the answer.");
+				var worklog = new MediationStore(turn.SessionId!, workspace.Workspace, worklogs).Load(turn.SessionId!, workspace.Workspace);
+				Check.Equal("user,assistant,answer,assistant", string.Join(",", worklog.Entries.Where(entry => entry.Role != "tool").Select(entry => entry.Role)),
+					"Record the turn without permission replies or empty tool-request messages");
+				var shell = worklog.Entries.FirstOrDefault(entry => entry.Role == "tool" && entry.Content.StartsWith("powershell succeeded"));
+				Check.True(shell?.Content.Contains("MediatedToolProbe") == true, "Record a compact tool result with its tool name.");
+				var answer = worklog.Entries.Single(entry => entry.Role == "answer");
+				Check.True(answer.Content.Contains("Which summary style?") && answer.Content.Contains("Answer: long"),
+					"Record a model question's answer with the question: " + answer.Content);
+			}
+			await using (var parked = CreateChat(enabled: false))
+			{
+				await parked.StartAsync(options);
+				provider.Replies.Enqueue(new LocalProvider.Reply("Nothing recorded."));
+				await RuntimeChecks.SendAndWaitAsync(parked, "Record nothing.");
+				Check.True(!Directory.Exists(new MediationStore(parked.SessionId!, workspace.Workspace, worklogs).DirectoryPath),
+					"Record nothing while the Mediator is disabled.");
+			}
+		}
+		finally
+		{
+			if (originalScope is null)
+				scopes.Remove(scopeKey);
+			else
+				scopes[scopeKey] = originalScope;
+		}
+	}
+}

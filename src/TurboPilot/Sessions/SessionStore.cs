@@ -4,9 +4,15 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using TurboPilot.Ai;
 using TurboPilot.Storage;
-using TurboPilot.Mediation;
 
 namespace TurboPilot.Sessions;
+
+// Context carried into a replacement session: the previous model's hand-off summary plus the
+// user's own requests, quoted exactly so their constraints cannot be summarized away.
+public sealed record SummaryBootstrap(string SourceSessionId, string Workspace, string Summary)
+{
+	public IReadOnlyList<string> RecentRequests { get; init; } = [];
+}
 
 public sealed class SessionRecord
 {
@@ -16,6 +22,8 @@ public sealed class SessionRecord
 	public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 	public string Description { get; set; } = "";
 	public List<string> Prompts { get; set; } = [];
+	// Prompts also holds answers to model questions; Requests holds only the user's own prompts.
+	public List<string> Requests { get; set; } = [];
 	public int ContextUsedTokens { get; set; }
 	public int ContextWindowTokens { get; set; }
 	public long AicNano { get; set; }

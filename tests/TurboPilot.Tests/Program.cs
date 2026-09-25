@@ -8,11 +8,12 @@ internal static class Program
 		{
 			await CoreChecks.RunAsync();
 			MediatorChecks.RunFoundation();
-			await MediatorChecks.RunProcessingAsync();
+			await MediatorChecks.RunParkedAsync();
+			RenderingChecks.Run();
 			if (args.Contains("--runtime"))
 			{
 				await RuntimeChecks.RunAsync();
-				await MediatedChatChecks.RunAsync();
+				await SessionFeatureChecks.RunAsync();
 			}
 			if (args.Contains("--ui") || args.Contains("--ui-close"))
 				await UiChecks.RunAsync(closingOnly: !args.Contains("--ui"));
@@ -20,8 +21,8 @@ internal static class Program
 				await RuntimeChecks.RunCloudAsync();
 			if (args.Contains("--mediator-native"))
 				await MediatorChecks.RunNativeAsync(args.Contains("--download-mediator"));
-			if (args.Contains("--mediator-chat") && !args.Contains("--runtime"))
-				await MediatedChatChecks.RunAsync();
+			if (args.Contains("--session-features") && !args.Contains("--runtime"))
+				await SessionFeatureChecks.RunAsync();
 			Console.WriteLine("All requested checks passed.");
 			return 0;
 		}

@@ -20,13 +20,8 @@ public partial class MediatorDialog : TurbolandFloatingDialog
 		_configuration = configuration;
 		_runtime = runtime;
 		_original = configuration.Load();
-		configuration.EnsureDocuments();
 		InitializeComponent();
 		checkEnabled.IsChecked = _original.Enabled;
-		checkReword.IsChecked = _original.RewordPrompts;
-		checkBeautify.IsChecked = _original.BeautifyOutput;
-		checkSummary.IsChecked = _original.MaintainSummary;
-		checkMonitor.IsChecked = _original.MonitorOutput;
 		checkDebug.IsChecked = _original.DebugRaw;
 		UpdateControls();
 		Loaded += async (_, _) => await QueryAsync();
@@ -140,10 +135,6 @@ public partial class MediatorDialog : TurbolandFloatingDialog
 			{
 				Enabled = checkEnabled.IsChecked == true,
 				ModelAlias = (comboModel.SelectedItem as LocalModelDescriptor)?.Alias ?? _original.ModelAlias,
-				RewordPrompts = checkReword.IsChecked == true,
-				BeautifyOutput = checkBeautify.IsChecked == true,
-				MaintainSummary = checkSummary.IsChecked == true,
-				MonitorOutput = checkMonitor.IsChecked == true,
 				DebugRaw = checkDebug.IsChecked == true,
 			};
 			_configuration.Save(result);
