@@ -7,8 +7,14 @@
 	     summary that are both written by other parties, so letting the list
 	     ask for the width it wants drags the dialog past any sane size. The
 	     content panel states its width, rows that overrun it scroll
-	     horizontally, and each row offers its whole label as a tooltip. -->
-	<StackPanel Margin="10" Width="900">
+	     horizontally, and each row offers its whole label as a tooltip.
+
+	     That stated width has to leave room for what the dialog draws
+	     around it: the frame, the padding inside it, and the margin the
+	     shadow is drawn in. Claiming the whole of MaxWidth pushes the
+	     content out under the right-hand frame, and the button row is
+	     where that lands. -->
+	<StackPanel Margin="10" Width="860">
 		<Label Content="Find by session ID, workspace, summary, or prompt"/>
 		<TextBox x:Name="textSearch" TextChanged="OnSearchChanged" Margin="0,4,0,8"/>
 		<ListBox x:Name="listSessions" Height="220" DisplayMemberPath="DisplayLabel"
@@ -20,7 +26,13 @@
 				</Style>
 			</ListBox.ItemContainerStyle>
 		</ListBox>
-		<TextBlock x:Name="textDetails" Margin="0,10,0,0" TextWrapping="Wrap" MaxWidth="880"/>
+		<!-- The details are read to be copied: a workspace path into a
+		     shell, a session ID into a file name. A read-only text box
+		     says the same thing as a label and can be selected. -->
+		<TextBox x:Name="textDetails" Margin="0,10,0,0" Height="92"
+				IsReadOnly="True" IsReadOnlyCaretVisible="True"
+				TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto"
+				HorizontalScrollBarVisibility="Auto"/>
 		<StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
 			<Button Content="Cancel" IsCancel="True" Click="OnCancel" Margin="0,0,12,0"/>
 			<Button x:Name="buttonView" Content="View" Click="OnView" Margin="0,0,12,0"/>

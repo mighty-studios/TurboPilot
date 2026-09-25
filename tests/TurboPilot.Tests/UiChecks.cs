@@ -12,6 +12,7 @@ using TurboPilot.Ai;
 using TurboPilot.Customizations;
 using TurboPilot.Dialogs;
 using TurboPilot.Rendering;
+using TurboPilot.Sessions;
 using TurboPilot.Tools;
 
 namespace TurboPilot.Tests;
@@ -223,6 +224,7 @@ internal static class UiChecks
 				"Offer the context actions of a running session.");
 			CheckTools(application, window, workspace);
 			CheckSettingsCaptions(workspace);
+			CheckPastSessionsLayout(window);
 			CheckPromptReferences(window);
 			await CheckCommandsAsync(window);
 			CheckChangeActions(application, window);
@@ -567,7 +569,80 @@ internal static class UiChecks
 		Console.WriteLine("PASS change card actions refusing what they cannot do");
 	}
 
-	private static void CheckSettingsCaptions(TestWorkspace workspace)	{
+	/// <summary>
+	/// The Past Sessions dialog has to fit what it draws. The content
+	/// states its own width, and nothing stopped it claiming more than
+	/// the frame, the padding and the shadow margin leave it, so the
+	/// right-hand frame line was pushed out from under the button row.
+	/// Its height was equally open, growing with a workspace path long
+	/// enough to wrap. The details pane is also read to be copied, so it
+	/// has to be selectable text rather than a label.
+	/// </summary>
+	private static void CheckPastSessionsLayout(MainWindow window)
+	{
+		var brief = Record("s1", "Reworked the Past Sessions dialog", @"D:\dev\p", "test-model", "prompt");
+		var wordy = Record(
+			"TurboPilot-20260925-" + new string('a', 32),
+			"Reworked the Past Sessions dialog so its buttons fit inside the frame around them",
+			@"D:\dev\projects\" + new string('w', 80),
+			"registry.example.com/org/" + new string('m', 80),
+			new string('d', 400));
+
+		var (briefWidth, briefHeight) = Measure(brief);
+		var (wordyWidth, wordyHeight) = Measure(wordy);
+
+		// Everything in a row and in the details pane is written by
+		// somebody else, so a dialog that sizes to them has no size.
+		Check.True(briefWidth == wordyWidth && briefHeight == wordyHeight,
+			$"The dialog must be the same size whatever it lists: {briefWidth}x{briefHeight} against {wordyWidth}x{wordyHeight}.");
+		Console.WriteLine("PASS Past Sessions dialog fits its frame and offers selectable details");
+
+		static SessionRecord Record(string id, string summary, string workspace, string model, string description) => new()
+		{
+			SessionId = id,
+			Summary = summary,
+			Description = description,
+			Options = new ChatSessionOptions
+			{
+				Model = model, WorkspaceFolder = workspace, Mode = "Standard",
+				UseByok = true, ByokEndpoint = "http://127.0.0.1:65535/v1",
+			},
+		};
+
+		(double Width, double Height) Measure(SessionRecord record)
+		{
+			var dialog = new PastSessionsDialog([record]) { Owner = window };
+			try
+			{
+				TurbolandTheme.Wpf.TurbolandTheme.ApplyTo(dialog);
+				dialog.Show();
+				dialog.UpdateLayout();
+
+				var details = Control<TextBox>(dialog, "textDetails");
+				Check.True(details.IsReadOnly, "The details pane must be read-only.");
+				Check.True(details.Focusable && details.IsHitTestVisible,
+					"The details pane must take focus and the mouse, or its text cannot be selected to copy.");
+				Check.True(details.Text.Contains(record.Options.WorkspaceFolder!),
+					"The details pane must carry the whole workspace path, since copying it is the point.");
+
+				// The window is capped, so content wider than the cap is
+				// not refused: it is squeezed, and what gives way is the
+				// frame down the right-hand side of the buttons.
+				var content = (FrameworkElement)dialog.Content;
+				var wanted = content.ActualWidth + content.Margin.Left + content.Margin.Right;
+				Check.True(content.DesiredSize.Width >= wanted,
+					$"The content must fit the frame around it rather than be squeezed into it: {content.DesiredSize.Width} for {wanted}.");
+				Check.True(dialog.ActualWidth < dialog.MaxWidth,
+					$"A dialog sized to its cap has already lost whatever did not fit: {dialog.ActualWidth} of {dialog.MaxWidth}.");
+				return (dialog.ActualWidth, dialog.ActualHeight);
+			}
+			finally { dialog.Close(); }
+		}
+	}
+
+
+	private static void CheckSettingsCaptions(TestWorkspace workspace)
+	{
 		// Constructing a Window registers it with the application, so every
 		// dialog opened here has to be closed again or later checks see a
 		// stray pop-up.
