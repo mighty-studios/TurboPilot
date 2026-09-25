@@ -28,6 +28,17 @@ public partial class SettingsDialog : TurbolandFloatingDialog
 	/// <summary>True once the user clicked Begin Session with a valid setup.</summary>
 	public bool BeginRequested { get; private set; }
 
+	// Items picked in Customization for the next prompt. Collected here
+	// because Customization is opened from this dialog, but the prompt
+	// box belongs to the main window.
+	private readonly List<string> _promptReferences = [];
+
+	/// <summary>
+	/// Lines naming the customization items the user picked, to be left
+	/// in the prompt box for editing rather than sent for them.
+	/// </summary>
+	public IReadOnlyList<string> PromptReferences => _promptReferences;
+
 	/// <summary>Selected workspace folder. Valid after Begin Session.</summary>
 	public string? WorkspacePath { get; private set; }
 
@@ -446,7 +457,13 @@ public partial class SettingsDialog : TurbolandFloatingDialog
 		// once Begin Session has run, so using it here would reset the
 		// user's in-dialog choice back to Standard.
 		var current = comboMode.SelectedItem as string ?? "Standard";
-		new CustomizeDialog().ShowDialog(this);
+		var customize = new CustomizeDialog();
+		customize.ShowDialog(this);
+		// Items picked for the prompt travel out with this dialog, since
+		// the main window is what owns the prompt box.
+		foreach (var reference in customize.PromptReferences)
+			if (!_promptReferences.Contains(reference, StringComparer.Ordinal))
+				_promptReferences.Add(reference);
 		// The customization lists may have changed; refresh the agent modes.
 		PopulateModes(current);
 	}

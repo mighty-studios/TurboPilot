@@ -134,6 +134,8 @@ The file is read on every new or resumed session, even when **Apply Instructions
 
 Customization changes apply when starting or resuming a session. Automatic discovery is suppressed so it cannot restore unchecked items. Permissions remain live and apply to the next request. **Autopilot approves every permission request**, so use it only with a trusted workspace and tools.
 
+Selecting an item in the Customization tabs fills **Item Details**. **Add To Prompt** names that item for the next request: skills, agents, and MCP servers by the name the runtime knows them by, everything else by the file path the model can read. The picks are dropped into the prompt box when the settings dialog closes, under whatever is already typed, and left there to edit. Nothing is sent on your behalf, the same pick twice still counts once, and Cancel in Customization discards the picks along with the rest of the dialog.
+
 ## Saved sessions
 
 **Session -> Past Sessions** searches saved sessions by ID, workspace, or prompt. **View** opens a transcript without connecting. **Resume** restores the original conversation, workspace, model settings, usage, and prompt history.

@@ -9,6 +9,7 @@ using System.Windows.Input;
 using System.Windows.Threading;
 using Microsoft.Web.WebView2.Wpf;
 using TurboPilot.Ai;
+using TurboPilot.Customizations;
 using TurboPilot.Dialogs;
 using TurboPilot.Tools;
 
@@ -221,6 +222,7 @@ internal static class UiChecks
 				"Offer the context actions of a running session.");
 			CheckTools(application, window, workspace);
 			CheckSettingsCaptions(workspace);
+			CheckPromptReferences(window);
 			await CheckCommandsAsync(window);
 			CheckChangeActions(application, window);
 
@@ -606,6 +608,45 @@ internal static class UiChecks
 			combo.SelectedIndex = 0;
 			return dialog;
 		}
+	}
+
+	/// <summary>
+	/// Customization's Add To Prompt names the picked items in the prompt
+	/// box and leaves them there to be edited.
+	/// </summary>
+	private static void CheckPromptReferences(MainWindow window)
+	{
+		var dialog = new CustomizeDialog();
+		try
+		{
+			var library = new CustomizationLibrary();
+			var skill = new CustomizationItem { FilePath = @"C:\kit\skills\pdf\SKILL.md", Name = "pdf" };
+			var prompt = new CustomizationItem { FilePath = @"C:\kit\prompts\review.md", Name = "review" };
+			library.Skills[skill.FilePath] = skill;
+			library.Prompts[prompt.FilePath] = prompt;
+			SetField(dialog, "_library", library);
+
+			Check.Equal("Use the \"pdf\" skill.", Invoke(dialog, "ReferenceFor", skill),
+				"A skill is named the way the runtime knows it");
+			Check.Equal($"Read {prompt.FilePath} first.", Invoke(dialog, "ReferenceFor", prompt),
+				"A file the model can read is named by its path");
+
+			var restore = Input(window);
+			try
+			{
+				SetInput(window, "");
+				Invoke(window, "AddPromptReferences", (IReadOnlyList<string>)["one", "two"]);
+				Check.Equal("one\r\ntwo", Input(window).TrimEnd(), "Both picks land in the prompt box");
+
+				Invoke(window, "AddPromptReferences", (IReadOnlyList<string>)["two", "three"]);
+				Check.Equal("one\r\ntwo\r\nthree", Input(window).TrimEnd(),
+					"A repeated pick must not be added twice, and typed text is kept");
+			}
+			finally { SetInput(window, restore); }
+
+			Console.WriteLine("PASS customization add to prompt");
+		}
+		finally { dialog.Close(); }
 	}
 
 	private static void CheckTools(Application application, MainWindow window, TestWorkspace workspace)

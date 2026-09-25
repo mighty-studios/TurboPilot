@@ -730,14 +730,22 @@ public partial class MainWindow : TurbolandWindow
 	/// <summary>
 	/// Replaces the prompt box with plain text and leaves the caret at the
 	/// end, so a recalled prompt is ready to edit or resend.
+	///
+	/// Each line becomes its own paragraph. A single run holding newline
+	/// characters would show as one long line, which is not what the
+	/// user typed and not what the box reads back.
 	/// </summary>
 	private void SetInputText(string text)
 	{
-		var paragraph = new System.Windows.Documents.Paragraph(
-			new System.Windows.Documents.Run(text));
 		richTextBoxInput.Document.Blocks.Clear();
-		richTextBoxInput.Document.Blocks.Add(paragraph);
-		richTextBoxInput.CaretPosition = paragraph.ContentEnd;
+		System.Windows.Documents.Paragraph? last = null;
+		foreach (var line in text.Replace("\r\n", "\n").Split('\n'))
+		{
+			last = new System.Windows.Documents.Paragraph(new System.Windows.Documents.Run(line));
+			richTextBoxInput.Document.Blocks.Add(last);
+		}
+		if (last is not null)
+			richTextBoxInput.CaretPosition = last.ContentEnd;
 		richTextBoxInput.Focus();
 	}
 
@@ -764,6 +772,7 @@ public partial class MainWindow : TurbolandWindow
 			var dialog = new Dialogs.SettingsDialog(ActiveWorkspacePath, IsSessionActive ? _chat?.RequestedOptions : null);
 			dialog.ShowDialog(this);
 
+			AddPromptReferences(dialog.PromptReferences);
 			if (dialog.BeginRequested && dialog.Result is { WorkspaceFolder.Length: > 0 } options)
 				await StartFromSettingsAsync(options);
 		}
@@ -771,6 +780,21 @@ public partial class MainWindow : TurbolandWindow
 		{
 			AppendOutput($"\r\n[error] Cannot open session settings: {ex.Message}\r\n\r\n");
 		}
+	}
+
+	/// <summary>
+	/// Puts the customization items the user picked into the prompt box,
+	/// under whatever is already typed. They are left there to be
+	/// edited: naming a skill is the start of a request, not the whole
+	/// of one, and nothing is sent on the user's behalf.
+	/// </summary>
+	private void AddPromptReferences(IReadOnlyList<string> references)
+	{
+		if (references.Count == 0) return;
+		var existing = GetInputText();
+		var addition = string.Join("\r\n", references.Where(line => !existing.Contains(line, StringComparison.Ordinal)));
+		if (addition.Length == 0) return;
+		SetInputText(existing.Length == 0 ? addition : existing + "\r\n" + addition);
 	}
 
 	private async Task StartFromSettingsAsync(ChatSessionOptions options)

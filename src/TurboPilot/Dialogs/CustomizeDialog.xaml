@@ -49,7 +49,8 @@
 
         <!-- Items collected from the search roots, one tab per type. The
         checkmark toggles participation; selecting a row shows its details.
-        Add To Prompt is a placeholder until item management. -->
+        Add To Prompt stages a mention of the selected item for the prompt
+        box, discarded with the rest of the dialog on Cancel. -->
         <Grid Margin="0,12,0,0" Height="250">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="440"/>
@@ -107,7 +108,7 @@
                 		PreviewKeyDown="OnOnlyEnabledBeforeToggle"
                 		Click="OnOnlyEnabledClick"
                 		Checked="OnOnlyEnabledChanged" Unchecked="OnOnlyEnabledChanged"/>
-                <Button x:Name="buttonAddToPrompt" Content="Add To Prompt" Width="149" IsEnabled="False" HorizontalAlignment="Left" Margin="0,6,0,0"/>
+                <Button x:Name="buttonAddToPrompt" Content="Add To Prompt" Width="149" IsEnabled="False" HorizontalAlignment="Left" Margin="0,6,0,0" Click="OnAddToPrompt"/>
                 <!-- Save/Load carry only the item enabled options, not the
                 folder list: those are application-level globals. -->
                 <StackPanel Orientation="Horizontal" Margin="0,6,0,0">

@@ -42,6 +42,17 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 	/// </summary>
 	public IReadOnlyList<string> Folders => _folders;
 
+	// Items the user chose to mention in the next prompt. Staged like
+	// everything else in this dialog: Cancel throws them away.
+	private readonly List<string> _promptReferences = [];
+
+	/// <summary>
+	/// Lines to put in the prompt box, naming the items the user picked.
+	/// They are a suggestion left in the box to be edited, not a message
+	/// sent on the user's behalf.
+	/// </summary>
+	public IReadOnlyList<string> PromptReferences => _promptReferences;
+
 	public CustomizeDialog()
 	{
 		InitializeComponent();
@@ -244,10 +255,50 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 		if (list.SelectedItem is not CustomizationItem item)
 		{
 			textBoxDetails.Text = string.Empty;
+			buttonAddToPrompt.IsEnabled = false;
 			return;
 		}
 
+		buttonAddToPrompt.IsEnabled = true;
 		ShowDetails(item);
+	}
+
+	/// <summary>
+	/// The line that names one item to the model. A file the model can
+	/// read is named by its path; everything else is named the way the
+	/// runtime knows it, because a skill is invoked by name and a path
+	/// to it would only be a file to open.
+	/// </summary>
+	internal string ReferenceFor(CustomizationItem item) => TypeNameFor(item) switch
+	{
+		"Skill" => $"Use the \"{item.Name}\" skill.",
+		"Agent" => $"Use the \"{item.Name}\" agent.",
+		"MCP Server" => $"Use the \"{item.Name}\" MCP server.",
+		_ => $"Read {item.FilePath} first.",
+	};
+
+	/// <summary>
+	/// Stages a mention of the selected item for the prompt box. The
+	/// same item twice is still one mention: repeating it would only
+	/// make the prompt longer.
+	/// </summary>
+	private void OnAddToPrompt(object sender, RoutedEventArgs e)
+	{
+		if (SelectedFoundItem() is not { } item) return;
+		var reference = ReferenceFor(item);
+		if (!_promptReferences.Contains(reference, StringComparer.Ordinal))
+			_promptReferences.Add(reference);
+		buttonAddToPrompt.Content = _promptReferences.Count == 1
+			? "Added To Prompt" : $"Added To Prompt ({_promptReferences.Count})";
+	}
+
+	/// <summary>The item selected on whichever tab is showing.</summary>
+	private CustomizationItem? SelectedFoundItem()
+	{
+		foreach (var list in new[] { listPrompts, listAgents, listSkills, listInstructions, listMcpServers })
+			if (list.IsVisible && list.SelectedItem is CustomizationItem item)
+				return item;
+		return null;
 	}
 
 	private void ShowDetails(CustomizationItem item)
