@@ -284,16 +284,22 @@ internal static class SessionFeatureChecks
 			await RuntimeChecks.SendAndWaitAsync(chat, OpeningRequest);
 
 			var before = provider.Requests.Count;
+			var transcript = chat.Transcript;
 			provider.Replies.Enqueue(new LocalProvider.Reply(
-				"<analysis>Notes.</analysis>\n<summary>\n## Overview\n\n**Documented** the readme without touching code. More detail followed.\n</summary>"));
+				"**Documented** the readme without touching code."));
 			var line = await chat.ArchiveAsync();
 			Check.Equal("Documented the readme without touching code.", line,
 				"Keep one plain sentence out of what the model wrote");
 			Check.Equal(before + 1, provider.Requests.Count, "Ask the session model once");
-			Check.True(!chat.Transcript.Contains("Overview"), "The archive line must not appear in the conversation.");
+			Check.True(chat.Transcript == transcript,
+				"The archive turn is not part of the conversation, so it must leave the transcript alone.");
+			Check.True(!workspace.Store.ReadTranscript(sessionId).Contains("one plain sentence"),
+				"The archive question must not be written to the saved transcript.");
 			Check.Equal(line, workspace.Store.Load(sessionId).Summary, "Store the line where the list reads it");
 			Check.True(workspace.Store.Load(sessionId).DisplayLabel.EndsWith(line!, StringComparison.Ordinal),
 				"The Past Sessions row must show the stored line");
+			Check.True(!workspace.Store.Load(sessionId).DisplayLabel.Contains(OpeningRequest, StringComparison.Ordinal),
+				"A summarized session must not still be listed by its opening prompt.");
 		}
 
 		// A session reopened and closed again without being asked
@@ -313,8 +319,8 @@ internal static class SessionFeatureChecks
 			await resumed.ResumeAsync(sessionId, options);
 			provider.Replies.Enqueue(new LocalProvider.Reply("Continued."));
 			await RuntimeChecks.SendAndWaitAsync(resumed, "Carry on.");
-			provider.Replies.Enqueue(new LocalProvider.Reply("<summary>\n \n</summary>"));
-			Check.True(await resumed.ArchiveAsync() is null, "An empty answer is not a summary.");
+			provider.Replies.Enqueue(new LocalProvider.Reply("Done."));
+			Check.True(await resumed.ArchiveAsync() is null, "A fragment is not a summary.");
 			Check.Equal("Documented the readme without touching code.", workspace.Store.Load(sessionId).Summary,
 				"A session that could not summarize keeps the line it already had");
 		}

@@ -33,6 +33,7 @@ public sealed partial class ChatService : IAsyncDisposable
 	private int _disposeStarted;
 	private long _sessionAicNano;
 	private TaskCompletionSource? _turnIdle;
+	private StringBuilder? _capture;
 	private Task? _disposeTask;
 	private AgentMode _agentMode;
 	private bool _startAttempted;
@@ -677,7 +678,7 @@ public sealed partial class ChatService : IAsyncDisposable
 							EmitTranscript(display, message.Data.MessageId);
 						EmitTranscript("\r\n\r\n", message.Data.MessageId);
 						// Tool-request messages without text have nothing to link.
-						if (_options.LinkFiles && !string.IsNullOrWhiteSpace(message.Data.Content))
+						if (_capture is null && _options.LinkFiles && !string.IsNullOrWhiteSpace(message.Data.Content))
 							QueueFormatting(message.Data.MessageId, display);
 						break;
 					case ToolExecutionStartEvent tool:
@@ -1015,6 +1016,16 @@ public sealed partial class ChatService : IAsyncDisposable
 			return;
 		lock (_sync)
 		{
+			// A captured turn is not part of the conversation the user is
+			// having. Its reply is collected and everything else is
+			// dropped, so neither the window nor the saved transcript
+			// shows a question the user did not ask.
+			if (_capture is not null)
+			{
+				if (messageId is not null)
+					_capture.Append(text);
+				return;
+			}
 			_transcript.Append(text);
 			if (_record is not null && _historyActive)
 			{
@@ -1268,9 +1279,23 @@ public sealed partial class ChatService : IAsyncDisposable
 	/// <summary>
 	/// How long the archive summary may hold up the end of a session. A
 	/// line in a list is not worth making somebody wait to close the
-	/// program, so the call is abandoned rather than waited out.
+	/// program, so the call is abandoned rather than waited out. One
+	/// sentence written from context already loaded is a short turn, but
+	/// a model under load still has to be given room to answer at all.
 	/// </summary>
-	private static readonly TimeSpan ArchiveTimeout = TimeSpan.FromSeconds(20);
+	private static readonly TimeSpan ArchiveTimeout = TimeSpan.FromSeconds(60);
+
+	/// <summary>
+	/// What the model is asked for at the end of a session. The shape of
+	/// the answer is spelled out because the answer is not read by a
+	/// person: it is put straight into a list row, which shows whatever
+	/// it is given on one line.
+	/// </summary>
+	internal const string ArchivePrompt =
+		"Summarize this entire session in exactly one plain sentence, written in the past tense, "
+		+ "saying what was actually worked on and what came of it. "
+		+ "Reply with that sentence and nothing else: no preamble, no heading, no list, no markdown, "
+		+ "no line breaks, and no tool calls. Keep it under 200 characters.";
 
 	/// <summary>
 	/// Records one sentence saying what the session was about, asked of
@@ -1280,6 +1305,15 @@ public sealed partial class ChatService : IAsyncDisposable
 	/// the answer is known: the opening prompt says what was intended,
 	/// which is frequently not what the session turned out to be, and
 	/// that is the thing worth reading in an archive months later.
+	///
+	/// The model is asked for the sentence outright rather than handed
+	/// the hand-off summarizer's document to be cut down locally. That
+	/// document is written to restart a session, so it is long, headed
+	/// and stepped, and picking a line out of it gave either the wrong
+	/// sentence or none. Asking for one sentence returns one sentence.
+	///
+	/// The turn is captured: it is not shown in the window and not
+	/// written to the saved transcript, because the user did not ask it.
 	///
 	/// Everything about it is best effort. A session that sent nothing
 	/// has nothing to say, and a failure, a timeout or a runtime already
@@ -1307,10 +1341,32 @@ public sealed partial class ChatService : IAsyncDisposable
 
 			using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
 			linked.CancelAfter(ArchiveTimeout);
-#pragma warning disable GHCP001
-			var result = await session.Rpc.History.SummarizeForHandoffAsync(linked.Token).ConfigureAwait(false);
-#pragma warning restore GHCP001
-			var sentence = ArchiveLine(HandoffSummary(result.Summary ?? ""));
+
+			Task idle;
+			StringBuilder capture;
+			lock (_sync)
+			{
+				_capture = capture = new StringBuilder();
+				_isWorking = true;
+				_turnIdle = new(TaskCreationOptions.RunContinuationsAsynchronously);
+				idle = _turnIdle.Task;
+			}
+			try
+			{
+				await session.SendAsync(new MessageOptions
+				{
+					Prompt = ArchivePrompt,
+					Mode = "immediate",
+					AgentMode = _agentMode,
+				}, linked.Token).ConfigureAwait(false);
+				await idle.WaitAsync(linked.Token).ConfigureAwait(false);
+			}
+			finally
+			{
+				lock (_sync) _capture = null;
+			}
+
+			var sentence = ArchiveLine(capture.ToString());
 			if (sentence.Length == 0) return null;
 
 			lock (_sync)
@@ -1333,12 +1389,12 @@ public sealed partial class ChatService : IAsyncDisposable
 	/// <summary>
 	/// The one sentence kept for the archive.
 	///
-	/// The summarizer writes structured prose: headings, numbered steps,
-	/// bullets and markdown emphasis. A Past Sessions row shows one line
-	/// literally, so all of that has to come off and exactly one sentence
-	/// has to come out. Anything that does not amount to a sentence is
-	/// rejected rather than stored, because a row reading "1." is worse
-	/// than a row falling back to the opening prompt.
+	/// The model is asked for a bare sentence, but an answer can still
+	/// arrive with a heading, a bullet or emphasis around it, and a Past
+	/// Sessions row shows one line literally. All of that comes off here
+	/// and exactly one sentence comes out. Anything that does not amount
+	/// to a sentence is rejected rather than stored, because a row
+	/// reading "1." is worse than a row falling back to the prompt.
 	/// </summary>
 	internal static string ArchiveLine(string summary)
 	{

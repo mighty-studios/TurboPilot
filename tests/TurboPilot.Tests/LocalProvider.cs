@@ -76,14 +76,14 @@ internal sealed class LocalProvider : IAsyncDisposable
 			if (!Replies.TryDequeue(out reply))
 			{
 				// A session end asks the model for one sentence for the
-				// archive, and that request is not streamed. Answering it
-				// with nothing spares every check that merely ends a
-				// session from having to script a summary it never reads,
-				// while an unscripted streamed turn is still a failure.
+				// archive. Answering that request from its own text spares
+				// every check that merely ends a session from scripting a
+				// summary it never reads, while any other unscripted
+				// streamed turn is still a failure.
 				var streamed = request.TryGetProperty("stream", out var streaming) && streaming.ValueKind == JsonValueKind.True;
-				if (streamed)
+				if (streamed && !MentionsArchivePrompt(request))
 					throw new InvalidOperationException("The provider received an unscripted request.");
-				reply = new Reply("");
+				reply = new Reply(streamed ? "The session ran and ended without a scripted summary." : "");
 			}
 			reply.Started.TrySetResult();
 			var id = "fixture-" + Guid.NewGuid().ToString("N");
@@ -204,6 +204,15 @@ internal sealed class LocalProvider : IAsyncDisposable
 		context.Response.Headers["Mcp-Session-Id"] = "fixture";
 		await WriteAsync(context.Response, JsonSerializer.Serialize(new { jsonrpc = "2.0", id, result }));
 	}
+
+	/// <summary>
+	/// Whether a request carries the sentence the archive asks for at the
+	/// end of a session. Matched on a distinctive phrase of the prompt
+	/// rather than the whole of it, because the runtime wraps what it
+	/// sends in instructions of its own.
+	/// </summary>
+	private static bool MentionsArchivePrompt(JsonElement request) =>
+		request.GetRawText().Contains("in exactly one plain sentence", StringComparison.OrdinalIgnoreCase);
 
 	private static async Task WriteAsync(HttpListenerResponse response, string text)
 	{
