@@ -9,6 +9,7 @@
 
 # Visual Studio
 .vs/
+*.user
 
 # Build results
 [Dd]ebug/
