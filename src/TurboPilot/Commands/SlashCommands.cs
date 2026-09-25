@@ -31,6 +31,8 @@ internal static class SlashCommands
 		new("/compact", "Summarize the conversation to reclaim context"),
 		new("/reset", "Start the conversation over, keeping the settings"),
 		new("/session", "Open settings to begin or change the session"),
+		new("/details", "List what the session is running with"),
+		new("/save", "Save the transcript to a file"),
 		new("/past", "Reopen an earlier session"),
 		new("/terminal", "Open a shell in the workspace"),
 		new("/files", "Open the workspace folder"),

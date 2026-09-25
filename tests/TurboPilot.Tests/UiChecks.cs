@@ -259,6 +259,7 @@ internal static class UiChecks
 			}
 			Check.True(rendered, "The Rendered tab must render streamed markdown and a Mermaid diagram.");
 			await CheckTranscriptSaveAsync(window);
+			CheckSessionDetailsNotice(window);
 			SetInput(window, "unsent draft");
 			Click(window, "buttonHistoryPrev");
 			Check.Equal("UI prompt marker", Input(window), "Recall a sent prompt with the up arrow");
@@ -610,6 +611,22 @@ internal static class UiChecks
 			combo.SelectedIndex = 0;
 			return dialog;
 		}
+	}
+
+	/// <summary>
+	/// The Session menu's Session Details, written into the transcript
+	/// rather than a dialog because the window is a narrow column.
+	/// </summary>
+	private static void CheckSessionDetailsNotice(MainWindow window)
+	{
+		var chat = Field<ChatService>(window, "_chat");
+		var before = chat.Transcript.Length;
+		Invoke(window, "ShowSessionDetails", chat);
+		var written = chat.Transcript[before..];
+		Check.True(written.Contains("Session Details:"), "The listing must be titled where it is written");
+		Check.True(written.Contains("Presentation") && written.Contains("Permissions"),
+			"The listing must cover the instructions and the grants in force");
+		Console.WriteLine("PASS session details listed into the transcript");
 	}
 
 	/// <summary>

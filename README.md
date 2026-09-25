@@ -63,6 +63,8 @@ Type `/` in the prompt box and a list of commands opens above it. Arrow keys mov
 | `/compact` | Summarize the conversation to reclaim context |
 | `/reset` | Start the conversation over, keeping the settings |
 | `/session` | Open settings to begin or change the session |
+| `/details` | List what the session is running with |
+| `/save` | Save the transcript to a file |
 | `/past` | Reopen an earlier session |
 | `/terminal` | Open a shell in the workspace |
 | `/files` | Open the workspace folder |
@@ -135,6 +137,8 @@ The file is read on every new or resumed session, even when **Apply Instructions
 Customization changes apply when starting or resuming a session. Automatic discovery is suppressed so it cannot restore unchecked items. Permissions remain live and apply to the next request. **Autopilot approves every permission request**, so use it only with a trusted workspace and tools.
 
 Selecting an item in the Customization tabs fills **Item Details**. **Add To Prompt** names that item for the next request: skills, agents, and MCP servers by the name the runtime knows them by, everything else by the file path the model can read. The picks are dropped into the prompt box when the settings dialog closes, under whatever is already typed, and left there to edit. Nothing is sent on your behalf, the same pick twice still counts once, and Cancel in Customization discards the picks along with the rest of the dialog.
+
+**Session -> Session Details** writes what the running session is configured with into the transcript: the model, mode, and workspace; the instructions, skills, agents, and MCP servers actually loaded, each named with the file it came from; the presentation instructions file; and the folder grants and pre-approved operations in force. The settings dialog says what will be asked for, this says what was granted, and the two can differ after a resume or a customization edit. A switch that is off says so rather than showing an empty list.
 
 ## Saved sessions
 **Session -> Past Sessions** searches saved sessions by ID, workspace, or prompt. **View** opens a transcript without connecting. **Resume** restores the original conversation, workspace, model settings, usage, and prompt history.

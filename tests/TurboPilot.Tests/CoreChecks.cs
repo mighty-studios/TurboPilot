@@ -23,6 +23,7 @@ internal static class CoreChecks
 		CheckWorkspaceReadme();
 		CheckShortText();
 		CheckSlashCommands();
+		CheckSessionDetails();
 		CheckWorkspaceChanges();
 		CheckSessionSnapshot();
 		CheckStorage();
@@ -171,6 +172,57 @@ internal static class CoreChecks
 		Check.True(listing.Rendered.Contains("&lt;b&gt;", StringComparison.Ordinal)
 			&& listing.Rendered.Contains("kp-listing-body", StringComparison.Ordinal),
 			"A listing keeps its columns in a pre block and escapes what it shows.");
+	}
+
+	/// <summary>
+	/// What a session reports it is running with. The point of the
+	/// listing is to find the one item that should not be there, so the
+	/// check is that items are named and that an off switch is stated
+	/// rather than shown as an empty list.
+	/// </summary>
+	private static void CheckSessionDetails()
+	{
+		var library = new CustomizationLibrary();
+		library.Instructions[@"C:\kit\a.instructions.md"] =
+			new CustomizationItem { FilePath = @"C:\kit\a.instructions.md", Name = "house-style", Enabled = true };
+		library.Skills[@"C:\kit\skills\pdf\SKILL.md"] =
+			new CustomizationItem { FilePath = @"C:\kit\skills\pdf\SKILL.md", Name = "pdf", Enabled = true };
+		library.Skills[@"C:\kit\skills\off\SKILL.md"] =
+			new CustomizationItem { FilePath = @"C:\kit\skills\off\SKILL.md", Name = "unused", Enabled = false };
+		library.Agents[@"C:\kit\agents\duck.md"] =
+			new CustomizationItem { FilePath = @"C:\kit\agents\duck.md", Name = "duck", Enabled = true };
+
+		var options = new ChatSessionOptions
+		{
+			WorkspaceFolder = @"C:\work",
+			Model = "a-model",
+			Mode = "duck",
+			Customizations = library,
+		};
+
+		var text = SessionDetails.Describe(options, "session-123", @"C:\app\turbopilot.instructions.md");
+		Check.True(text.Contains("session-123") && text.Contains(@"C:\work"),
+			"The listing must name the session and the workspace");
+		Check.True(text.Contains("house-style") && text.Contains(@"C:\kit\a.instructions.md"),
+			"An instruction must be named with the file it came from");
+		Check.True(text.Contains("pdf") && !text.Contains("unused"),
+			"Only what is enabled is in force, so only that is listed");
+		Check.True(text.Contains("duck  (in use)"),
+			"The agent the mode selected must say so; that is the one that changes the answers");
+		Check.True(text.Contains(@"C:\app\turbopilot.instructions.md"),
+			"The presentation instructions are part of what the session runs with");
+		Check.True(text.Contains("None are enabled."), "An empty list says so rather than showing nothing");
+
+		var off = SessionDetails.Describe(options with { ApplyInstructions = false, PreloadSkills = false },
+			null, null);
+		Check.True(off.Contains("Apply Instructions is off") && off.Contains("Preload Skills is off"),
+			"A switch that is off must be stated, not shown as an empty list");
+		Check.True(off.Contains("none") && off.Contains("not loaded"),
+			"A session that has not started still describes itself");
+
+		var autopilot = SessionDetails.Describe(options with { Mode = "Autopilot" }, null, null);
+		Check.True(autopilot.Contains("Autopilot approves every request"),
+			"The mode that grants everything must say so where permissions are read");
 	}
 
 	private static void CheckConfiguration()

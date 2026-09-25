@@ -167,6 +167,10 @@ public partial class MainWindow : TurbolandWindow
 		menuNewSession.Header = active ? "C_hange Session..." : "_Begin Session...";
 		menuNewSession.IsEnabled = !_sessionChanging && !_closing;
 		menuPastSessions.IsEnabled = !_sessionChanging && !_closing;
+		// Both describe a transcript that exists rather than drive the
+		// session, so they stay usable while a turn is running.
+		menuSessionDetails.IsEnabled = active && !_closing;
+		menuSaveTranscript.IsEnabled = _chat is not null && !_closing;
 		menuCompactContext.IsEnabled = ready && !_sendingInput;
 		menuResetContext.IsEnabled = ready && !_sendingInput;
 
@@ -1345,6 +1349,12 @@ public partial class MainWindow : TurbolandWindow
 			case "/session":
 				await OpenSettingsDialogAsync();
 				break;
+			case "/details":
+				ShowSessionDetails(chat);
+				break;
+			case "/save":
+				await SaveTranscriptAsync();
+				break;
 			case "/past":
 				OnPastSessions(this, args);
 				break;
@@ -1622,8 +1632,33 @@ public partial class MainWindow : TurbolandWindow
 		noticeTextBlock.Visibility = Visibility.Visible;
 	}
 
-	// -- Saving a transcript ---------------------------------------------------
+	// -- Session details -------------------------------------------------------
 
+	/// <summary>
+	/// Session menu: writes what the running session is configured with
+	/// into the transcript. The settings dialog says what will be asked
+	/// for; this says what was granted, which is what matters when an
+	/// answer is surprising.
+	/// </summary>
+	private void OnSessionDetails(object sender, RoutedEventArgs e)
+	{
+		if (_chat is not { } chat)
+		{
+			MessageDialog.Ok(this, "There is no session running to describe.", "Session Details");
+			return;
+		}
+		ShowSessionDetails(chat);
+	}
+
+	private void ShowSessionDetails(ChatService chat)
+	{
+		var body = SessionDetails.Describe(chat.Options, _sessionId,
+			chat.ApplicationInstructionsPath, _sessionModel);
+		var listing = NoticeFormatter.Listing("Session Details", body);
+		chat.AddNotice(listing.Text, listing.Rendered);
+	}
+
+	// -- Saving a transcript ---------------------------------------------------
 	/// <summary>
 	/// Session menu: writes the transcript to a file the user picks. The
 	/// chosen extension decides the form, so one entry covers a page to

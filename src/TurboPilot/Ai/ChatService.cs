@@ -106,6 +106,14 @@ public sealed class ChatService : IAsyncDisposable
 	}
 	public int ContextWindowTokens { get; private set; }
 	public int ContextUsedTokens { get; private set; }
+
+	/// <summary>
+	/// The presentation instructions file this session reads, so a
+	/// listing can name the file the user would edit rather than the one
+	/// a test happened to point at.
+	/// </summary>
+	public string ApplicationInstructionsPath =>
+		_applicationInstructionsPath ?? ApplicationInstructions.DefaultPath;
 	public double AicUsed => Interlocked.Read(ref _sessionAicNano) / 1_000_000_000.0;
 	public SessionRecord? Record => _record;
 
