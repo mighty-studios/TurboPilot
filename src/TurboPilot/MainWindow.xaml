@@ -218,7 +218,7 @@
 								HorizontalScrollBarVisibility="Auto" 
 								IsReadOnly="True"
 								AcceptsTab="True" 
-								AcceptsReturn="True">
+								AcceptsReturn="True" Grid.RowSpan="2">
                         <RichTextBox.Resources>
                             <Style TargetType="{x:Type Paragraph}">
                                 <Setter Property="Margin" Value="0"/>
@@ -235,7 +235,7 @@
                  the left margin keeps it clear of the tab headers. -->
             <TextBlock x:Name="sessionInfo" HorizontalAlignment="Right" TextAlignment="Right"
 						Margin="0,10,8,0" TextWrapping="Wrap" VerticalAlignment="Top"
-						Text="No session active" Width="631"/>
+						Text="No session active" Width="552" Height="33"/>
         </Grid>
 
     </DockPanel>
