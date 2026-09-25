@@ -83,8 +83,22 @@ internal static class NoticeFormatter
 		return (text.ToString(), rendered.ToString());
 	}
 
-	private static string Card(string kind, string title, string? body, string? detail,
-		IReadOnlyList<string> choices, string hint)
+	/// <summary>
+	/// A block of already-aligned text under a heading, for listings the
+	/// program writes itself. The body keeps its own spacing: it is laid
+	/// out in columns before it gets here, and reflowing it would undo
+	/// the only thing making it readable.
+	/// </summary>
+	public static (string Text, string Rendered) Listing(string title, string body)
+	{
+		var rendered = new StringBuilder("<div class=\"kp-card kp-listing\">")
+			.Append("<div class=\"kp-card-title\">").Append(Escape(title)).Append("</div>")
+			.Append("<pre class=\"kp-listing-body\">").Append(Escape(body)).Append("</pre>")
+			.Append("</div>");
+		return (title + ":\r\n" + body, rendered.ToString());
+	}
+
+	private static string Card(string kind, string title, string? body, string? detail,		IReadOnlyList<string> choices, string hint)
 	{
 		var sb = new StringBuilder("<div class=\"kp-card kp-").Append(kind).Append("\">")
 			.Append("<div class=\"kp-card-title\">").Append(Escape(title)).Append("</div>");

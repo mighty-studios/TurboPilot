@@ -221,6 +221,7 @@ internal static class UiChecks
 				"Offer the context actions of a running session.");
 			CheckTools(application, window, workspace);
 			CheckSettingsCaptions(workspace);
+			await CheckCommandsAsync(window);
 
 			var reply = new LocalProvider.Reply("**UI streaming reply**\n\n```mermaid\ngraph TD\nA[Input] --> B[Output]\n```");
 			provider.Replies.Enqueue(reply);
@@ -482,8 +483,57 @@ internal static class UiChecks
 	/// restart it, so "OK" versus "Begin Session" is a behavior
 	/// difference the user can see before clicking.
 	/// </summary>
-	private static void CheckSettingsCaptions(TestWorkspace workspace)
+	/// <summary>
+	/// The command completion list and one command running end to end.
+	/// The list has to stay out of the layout, so what is checked is
+	/// that it lives in a popup and opens and closes on its own.
+	/// </summary>
+	private static async Task CheckCommandsAsync(MainWindow window)
 	{
+		var popup = Control<Popup>(window, "commandPopup");
+		var list = Control<ListBox>(window, "commandList");
+		var input = Control<RichTextBox>(window, "richTextBoxInput");
+		var width = window.ActualWidth;
+
+		Check.True(!popup.IsOpen, "The command list stays shut until a command is typed.");
+		SetInput(window, "just a message");
+		Check.True(!popup.IsOpen, "An ordinary message must not summon the command list.");
+
+		SetInput(window, "/");
+		Check.True(popup.IsOpen && list.Items.Count > 1, "A slash opens the command list.");
+		Check.Equal(0, list.SelectedIndex, "Highlight the first command");
+		Check.Equal(width, window.ActualWidth, "The command list must not widen the window");
+
+		SetInput(window, "/pa");
+		Check.Equal(1, list.Items.Count, "Narrow the list to what has been typed");
+
+		Check.True((bool)Invoke(window, "HandleCommandKey", Key.Down)!, "The list claims the arrow keys.");
+		Check.True((bool)Invoke(window, "HandleCommandKey", Key.Tab)!, "Tab completes the highlighted command.");
+		Check.Equal("/past", Input(window), "Tab must leave the completed command in the prompt");
+		Check.True(!popup.IsOpen, "Completing a command closes the list.");
+
+		SetInput(window, "/he");
+		Check.True(popup.IsOpen, "Reopen the list for a fresh command.");
+		Check.True((bool)Invoke(window, "HandleCommandKey", Key.Escape)!, "Escape dismisses the list.");
+		Check.True(!popup.IsOpen && Input(window) == "/he", "Escape must dismiss without editing the prompt");
+		Check.True(!(bool)Invoke(window, "HandleCommandKey", Key.Down)!,
+			"A dismissed list must hand its keys back to the editor.");
+
+		var chat = Field<ChatService>(window, "_chat");
+		var before = chat.Transcript.Length;
+		SetInput(window, "/help");
+		Click(window, "buttonSend");
+		await Check.UntilAsync(() => chat.Transcript.Contains("/compact"), "The help command printed nothing.");
+		Check.True(chat.Transcript.Length > before, "A command answers in the transcript.");
+		Check.Equal(string.Empty, Input(window), "Running a command clears the prompt");
+		Check.True(Status(window).StartsWith("Ready.."),
+			"A command is answered locally and never starts a turn.");
+
+		input.Document.Blocks.Clear();
+		Console.WriteLine("PASS typed commands: completion list, keys, and local answer without a turn");
+	}
+
+	private static void CheckSettingsCaptions(TestWorkspace workspace)	{
 		// Constructing a Window registers it with the application, so every
 		// dialog opened here has to be closed again or later checks see a
 		// stray pop-up.

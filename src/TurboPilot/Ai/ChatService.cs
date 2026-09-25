@@ -810,6 +810,28 @@ public sealed class ChatService : IAsyncDisposable
 	}
 
 	/// <summary>
+	/// Prints the plan again at the foot of the transcript, for a user
+	/// who has scrolled past the card and wants it back in front of
+	/// them. The reprint becomes the live card, so later revisions land
+	/// on the copy the user is actually looking at.
+	/// </summary>
+	internal void RepeatPlan()
+	{
+		lock (_sync)
+		{
+			if (_plan.Count == 0)
+			{
+				AddNotice(NoticeFormatter.Status("plan", "No plan for this turn."));
+				return;
+			}
+			var checklist = NoticeFormatter.Checklist(_plan);
+			_planMessageId = "plan:" + Guid.NewGuid().ToString("N");
+			EmitTranscript("\r\n" + checklist.Text + "\r\n\r\n", _planMessageId,
+				"\r\n\r\n" + checklist.Rendered + "\r\n\r\n");
+		}
+	}
+
+	/// <summary>
 	/// Looks up the latest Copilot CLI release off the event thread and
 	/// writes one line if the running CLI is behind. BYOK sessions never
 	/// reach here: they do not use the CLI, so its version is not their

@@ -6,6 +6,7 @@ using System.Windows.Media;
 using Microsoft.Web.WebView2.Wpf;
 using TurbolandTheme.Wpf.Controls;
 using TurboPilot.Ai;
+using TurboPilot.Commands;
 using TurboPilot.Customizations;
 using TurboPilot.Dialogs;
 using TurboPilot.Rendering;
@@ -120,6 +121,10 @@ public partial class MainWindow : TurbolandWindow
 
 		// Ctrl+Enter sends the current input from anywhere in the window.
 		PreviewKeyDown += Input_PreviewKeyDown;
+
+		// Command completion follows what is typed in the prompt box.
+		richTextBoxInput.TextChanged += Input_TextChanged;
+		richTextBoxInput.LostKeyboardFocus += (_, _) => commandPopup.IsOpen = false;
 
 		// No session is active until the user starts or resumes one.
 		SetSessionActive(false);
@@ -1182,6 +1187,15 @@ public partial class MainWindow : TurbolandWindow
 		var text = GetInputText();
 		if (string.IsNullOrWhiteSpace(text) && _attachments.Count == 0) return;
 
+		// A typed command is answered here and never reaches the model.
+		if (SlashCommands.Parse(text) is { } typed)
+		{
+			richTextBoxInput.Document.Blocks.Clear();
+			commandPopup.IsOpen = false;
+			await RunCommandAsync(typed.Command, chat);
+			return;
+		}
+
 		// Only text enters the history. A send carrying nothing but an
 		// attachment has no words worth recalling.
 		if (!string.IsNullOrWhiteSpace(text))
@@ -1241,8 +1255,19 @@ public partial class MainWindow : TurbolandWindow
 	private void Input_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
 	{
 		if (e.Handled) return;
-		if (!IsSendShortcut(e.Key == System.Windows.Input.Key.System ? e.SystemKey : e.Key,
-			System.Windows.Input.Keyboard.Modifiers))
+		var key = e.Key == System.Windows.Input.Key.System ? e.SystemKey : e.Key;
+
+		// The completion list gets first refusal on its own keys, but not
+		// on the Send shortcut: Ctrl+Enter sends whatever is typed even
+		// with the list up.
+		if (System.Windows.Input.Keyboard.Modifiers == System.Windows.Input.ModifierKeys.None
+			&& HandleCommandKey(key))
+		{
+			e.Handled = true;
+			return;
+		}
+
+		if (!IsSendShortcut(key, System.Windows.Input.Keyboard.Modifiers))
 			return;
 		e.Handled = true;
 		if (buttonSend.IsEnabled)
@@ -1258,6 +1283,117 @@ public partial class MainWindow : TurbolandWindow
 	internal static bool IsSendShortcut(System.Windows.Input.Key key, System.Windows.Input.ModifierKeys modifiers) =>
 		key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Return
 		&& modifiers == System.Windows.Input.ModifierKeys.Control;
+
+	// -- Typed commands --------------------------------------------------------
+
+	/// <summary>
+	/// Runs one typed command. Each is a shortcut to something the menus
+	/// already do, so the work stays in the menu handler and this only
+	/// decides which one to call.
+	/// </summary>
+	private async Task RunCommandAsync(SlashCommand command, ChatService chat)
+	{
+		var args = new RoutedEventArgs();
+		switch (command.Name)
+		{
+			case "/help":
+			{
+				var help = NoticeFormatter.Listing("Commands", SlashCommands.HelpText());
+				chat.AddNotice(help.Text, help.Rendered);
+				break;
+			}
+			case "/plan":
+				chat.RepeatPlan();
+				break;
+			case "/attach":
+				ButtonAttachments_Click(this, args);
+				break;
+			case "/compact":
+				OnCompactContext(this, args);
+				break;
+			case "/reset":
+				OnResetContext(this, args);
+				break;
+			case "/session":
+				await OpenSettingsDialogAsync();
+				break;
+			case "/past":
+				OnPastSessions(this, args);
+				break;
+			case "/terminal":
+				OnOpenPowerShell(this, args);
+				break;
+			case "/files":
+				OnOpenExplorer(this, args);
+				break;
+			case "/editor":
+				OnOpenVsCode(this, args);
+				break;
+		}
+	}
+
+	/// <summary>
+	/// Opens, refills, or closes the completion list for what has been
+	/// typed so far.
+	/// </summary>
+	private void Input_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
+	{
+		var matches = SlashCommands.Suggest(GetInputText());
+		if (matches.Count == 0)
+		{
+			commandPopup.IsOpen = false;
+			return;
+		}
+
+		commandList.ItemsSource = matches;
+		commandList.SelectedIndex = 0;
+		commandPopup.IsOpen = true;
+	}
+
+	/// <summary>
+	/// Replaces what has been typed with the highlighted command. The
+	/// caret lands after a trailing space, because the commands that
+	/// take an argument are the ones worth completing.
+	/// </summary>
+	private void AcceptCommand()
+	{
+		if (commandList.SelectedItem is not SlashCommand command) return;
+		commandPopup.IsOpen = false;
+		SetInputText(command.Name + " ");
+	}
+
+	private void CommandList_Click(object sender, System.Windows.Input.MouseButtonEventArgs e) => AcceptCommand();
+
+	/// <summary>
+	/// Keys the completion list claims while it is open. Enter and Tab
+	/// accept, the arrows move, Escape dismisses without changing a
+	/// character of what was typed.
+	/// </summary>
+	private bool HandleCommandKey(System.Windows.Input.Key key)
+	{
+		if (!commandPopup.IsOpen || commandList.Items.Count == 0) return false;
+		switch (key)
+		{
+			case System.Windows.Input.Key.Escape:
+				commandPopup.IsOpen = false;
+				return true;
+			case System.Windows.Input.Key.Tab:
+			case System.Windows.Input.Key.Enter:
+				AcceptCommand();
+				return true;
+			case System.Windows.Input.Key.Down:
+				commandList.SelectedIndex = (commandList.SelectedIndex + 1) % commandList.Items.Count;
+				commandList.ScrollIntoView(commandList.SelectedItem);
+				return true;
+			case System.Windows.Input.Key.Up:
+				commandList.SelectedIndex = (commandList.SelectedIndex - 1 + commandList.Items.Count) % commandList.Items.Count;
+				commandList.ScrollIntoView(commandList.SelectedItem);
+				return true;
+			default:
+				return false;
+		}
+	}
+
 
 	// ── Session context ──────────────────────────────────────────────────────
 

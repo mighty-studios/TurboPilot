@@ -273,6 +273,15 @@ input[type="radio"] {
 	margin-top: 4px;
 }
 
+/* A listing the program wrote itself: columns already aligned in the
+   text, so the spacing is kept and the block scrolls rather than wraps. */
+.kp-listing-body {
+	margin: 4px 0 0 0;
+	white-space: pre;
+	overflow-x: auto;
+	font: inherit;
+}
+
 /* The agent's plan: one line per step, its state in an ASCII box. */
 .kp-plan-steps {
 	margin: 4px 0 2px 0;

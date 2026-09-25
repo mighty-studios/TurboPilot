@@ -230,6 +230,32 @@
                     <TextBlock x:Name="noticeTextBlock" Grid.Row="1" Margin="4,4,4,0"
 							TextWrapping="Wrap" MaxHeight="68" Visibility="Collapsed"
 							Foreground="{DynamicResource Turboland.Brush.WindowForeground}"/>
+                    <!-- Command completion. The prompt box is at the bottom of
+                         the window, so the list opens upward over the output
+                         rather than off the bottom of the screen. It is a
+                         popup and not a pane: nothing about it can widen the
+                         window. -->
+                    <Popup x:Name="commandPopup" Placement="Top" StaysOpen="True"
+							Focusable="False" AllowsTransparency="False"
+							PlacementTarget="{Binding ElementName=richTextBoxInput}">
+                        <Border Background="{DynamicResource Turboland.Brush.ControlFace}"
+								BorderBrush="{DynamicResource Turboland.Brush.ControlShadow}"
+								BorderThickness="1">
+                            <ListBox x:Name="commandList" Width="420" MaxHeight="176"
+									Focusable="False" BorderThickness="0"
+									ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+									MouseLeftButtonUp="CommandList_Click">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{Binding Name}" Width="96"/>
+                                            <TextBlock Text="{Binding Summary}"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Border>
+                    </Popup>
                 </Grid>
             </Grid>
             <!-- Live session badge over the output area: model and session id

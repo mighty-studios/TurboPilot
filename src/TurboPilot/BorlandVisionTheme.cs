@@ -292,6 +292,8 @@ public static class BorlandVisionTheme
 			Semantic.Warning),
 		new(".kp-plan-pending .kp-plan-box, .kp-plan-pending .kp-plan-title", "A step not started yet",
 			Semantic.DesktopForeground),
+		new(".kp-listing-body", "A listing the program wrote, such as the command list",
+			Semantic.DesktopForeground),
 		new(".kp-status-tag", "Status tag, such as tool or error",
 			Semantic.Accent),
 		new(".kp-status-text", "Status text",

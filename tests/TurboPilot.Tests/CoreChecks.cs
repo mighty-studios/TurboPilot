@@ -2,6 +2,7 @@ using System.IO;
 using System.Text;
 using GitHub.Copilot;
 using TurboPilot.Ai;
+using TurboPilot.Commands;
 using TurboPilot.Customizations;
 using TurboPilot.Dialogs;
 using TurboPilot.Permissions;
@@ -21,6 +22,7 @@ internal static class CoreChecks
 		await CheckCliUpdateAsync();
 		CheckWorkspaceReadme();
 		CheckShortText();
+		CheckSlashCommands();
 		CheckSessionSnapshot();
 		CheckStorage();
 		await CheckQuestionsAsync();
@@ -29,9 +31,54 @@ internal static class CoreChecks
 		Console.WriteLine("PASS configuration, history storage, questions, streaming events, usage, prompt navigation, and external tools");
 	}
 
-	private static void CheckConfiguration()
+	/// <summary>
+	/// Typed commands. The risk worth checking is not that a command
+	/// fails to run, but that an ordinary message is mistaken for one
+	/// and never reaches the model.
+	/// </summary>
+	private static void CheckSlashCommands()
 	{
-		using var workspace = new TestWorkspace();
+		Check.True(SlashCommands.Parse("/help") is { } help && help.Command.Name == "/help",
+			"A bare command must be recognized.");
+		Check.True(SlashCommands.Parse("  /HELP  ") is not null, "Commands ignore case and surrounding space.");
+		Check.True(SlashCommands.Parse("/attach notes.txt") is { } attach && attach.Argument == "notes.txt",
+			"Everything after the command is its argument.");
+
+		Check.True(SlashCommands.Parse("/nonesuch") is null, "An unknown command is an ordinary message.");
+		Check.True(SlashCommands.Parse("Look at /help in the docs") is null,
+			"A message that mentions a command is not a command.");
+		Check.True(SlashCommands.Parse("/help\r\nand then explain it") is null,
+			"A command is one line, never the opening of a longer message.");
+		Check.True(SlashCommands.Parse("") is null && SlashCommands.Parse(null) is null,
+			"An empty prompt is not a command.");
+
+		Check.True(SlashCommands.Suggest("/").Count == SlashCommands.All.Count, "A lone slash offers everything.");
+		Check.Equal(1, SlashCommands.Suggest("/pa").Count, "Offer only what matches what is typed");
+		Check.Equal("/past", SlashCommands.Suggest("/pa")[0].Name, "Complete the typed prefix");
+		Check.Equal(0, SlashCommands.Suggest("/help").Count, "A command typed in full has nothing left to complete");
+		Check.Equal(0, SlashCommands.Suggest("/attach notes.txt").Count,
+			"Stop offering commands once an argument is being typed");
+		Check.Equal(0, SlashCommands.Suggest("explain /help").Count, "Never offer commands mid-sentence");
+
+		var listed = SlashCommands.HelpText();
+		foreach (var command in SlashCommands.All)
+		{
+			Check.True(listed.Contains(command.Name, StringComparison.Ordinal),
+				"The command list must name every command: " + command.Name);
+			Check.True(command.Name.StartsWith(SlashCommands.Prefix, StringComparison.Ordinal)
+				&& command.Name.Length > 1, "Every command needs a name after its prefix.");
+			Check.True(SlashCommands.Parse(command.Name) is not null,
+				"Every listed command must parse: " + command.Name);
+		}
+
+		var listing = NoticeFormatter.Listing("Commands", "/help  <b>");
+		Check.True(listing.Rendered.Contains("&lt;b&gt;", StringComparison.Ordinal)
+			&& listing.Rendered.Contains("kp-listing-body", StringComparison.Ordinal),
+			"A listing keeps its columns in a pre block and escapes what it shows.");
+	}
+
+	private static void CheckConfiguration()
+	{		using var workspace = new TestWorkspace();
 		var library = workspace.CreateLibrary();
 		var serverFile = workspace.Write("servers.mcp.json", """
 			{"servers":{"enabled":{"type":"http","url":"http://127.0.0.1:5000/mcp","headers":{"Authorization":"fixture-value"}},"no-tools":{"type":"http","url":"http://127.0.0.1:5000/mcp","tools":[]},"disabled":{"type":"unsupported"}}}

@@ -14,6 +14,25 @@ The **Raw** tab preserves streamed conversation text. **Rendered** supports mark
 
 The status line shows `Starting..`, `Ready..`, `Working..`, or `Waiting..`, followed by context usage in whole Ki tokens. Cloud sessions also display whole AI Credits as `AiC=<value>`. Long model IDs and session IDs are shortened to keep the status line and the Past Sessions list at a readable width; hover either to see the full value.
 
+## Typed commands
+
+Type `/` in the prompt box and a list of commands opens above it. Arrow keys move, `Tab` or `Enter` completes, `Esc` dismisses. `Ctrl+Enter` still sends whatever is typed.
+
+| Command | Does |
+| --- | --- |
+| `/help` | List these commands |
+| `/plan` | Show the agent's current plan |
+| `/attach` | Choose files to send with the next prompt |
+| `/compact` | Summarize the conversation to reclaim context |
+| `/reset` | Start the conversation over, keeping the settings |
+| `/session` | Open settings to begin or change the session |
+| `/past` | Reopen an earlier session |
+| `/terminal` | Open a shell in the workspace |
+| `/files` | Open the workspace folder |
+| `/editor` | Open the workspace in the code editor |
+
+A command is recognized only when the prompt is the command and nothing else. A message that mentions `/help`, or a path that begins with a slash, or anything spanning two lines, goes to the model unchanged. So does a command that is not in the list.
+
 ## Following the agent's plan
 
 When the agent plans work as a list of steps, the status line says where it is:
