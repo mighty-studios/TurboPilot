@@ -8,6 +8,7 @@ using TurbolandTheme.Wpf.Controls;
 using TurboPilot.Ai;
 using TurboPilot.Customizations;
 using TurboPilot.Dialogs;
+using TurboPilot.Rendering;
 using TurboPilot.Sessions;
 using TurboPilot.Tools;
 
@@ -754,6 +755,10 @@ public partial class MainWindow : TurbolandWindow
 
 	private async Task StartFromSettingsAsync(ChatSessionOptions options)
 	{
+		// The readme is offered after the session-change state is cleared,
+		// so the send is an ordinary prompt against a settled session.
+		var offerReadme = false;
+		var previousWorkspace = IsSessionActive ? ActiveWorkspacePath : null;
 		using var cancellation = new CancellationTokenSource();
 		_restartCancellation = cancellation;
 		_sessionChanging = true;
@@ -793,12 +798,52 @@ public partial class MainWindow : TurbolandWindow
 			}
 			cancellation.Token.ThrowIfCancellationRequested();
 			await StartChatCoreAsync(options, null, bootstrap);
+			// Only a session on a project the user has not opened yet is
+			// worth orienting. A session carrying a hand-off summary
+			// already knows the project, and restarting the same workspace
+			// to change a model or a setting does not make it new again.
+			offerReadme = bootstrap is null
+				&& !string.Equals(previousWorkspace, options.WorkspaceFolder, StringComparison.OrdinalIgnoreCase);
 		}
 		catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
 		finally
 		{
 			_restartCancellation = null;
 			_sessionChanging = false;
+			RefreshChatState();
+		}
+		if (offerReadme)
+			await OfferWorkspaceReadmeAsync();
+	}
+
+	/// <summary>
+	/// Offers to open a session on a new project by sending its readme, so
+	/// the model starts with the project's own description of itself. The
+	/// file goes as an attachment on a prompt that asks only for a summary.
+	/// Declining, a workspace without a readme, and a session that failed
+	/// to start all leave the transcript as it is.
+	/// </summary>
+	private async Task OfferWorkspaceReadmeAsync()
+	{
+		var chat = _chat;
+		if (chat is null || !IsSessionActive || _closing)
+			return;
+		if (WorkspaceReadme.Find(ActiveWorkspacePath) is not { } readme)
+			return;
+		if (!YesNoDialog.Ask(this, WorkspaceReadme.Question(readme), "Project Readme"))
+			return;
+		_sendingInput = true;
+		SetSessionActive(IsSessionActive);
+		try { await chat.SendAsync(WorkspaceReadme.Prompt(readme), [readme]); }
+		catch (OperationCanceledException) { }
+		catch (Exception ex)
+		{
+			var (text, rendered) = NoticeFormatter.Status("error", "Cannot send the readme: " + ex.Message);
+			ForActiveChat(chat, () => chat.AddNotice(text, rendered));
+		}
+		finally
+		{
+			_sendingInput = false;
 			RefreshChatState();
 		}
 	}

@@ -16,6 +16,7 @@ internal static class CoreChecks
 		CheckConfiguration();
 		CheckApplicationInstructions();
 		CheckExternalTools();
+		CheckWorkspaceReadme();
 		CheckStorage();
 		await CheckQuestionsAsync();
 		await CheckEventsAsync();
@@ -155,6 +156,28 @@ internal static class CoreChecks
 		Check.Equal("code", editor.FileName, "Resolve the VS Code launcher on PATH");
 		Check.Equal($"\"{workspace.Workspace}\"", editor.Arguments, "Open VS Code on the workspace");
 		Check.True(editor.UseShellExecute, "A PATH shim needs the shell to resolve it.");
+	}
+
+	private static void CheckWorkspaceReadme()
+	{
+		using var workspace = new TestWorkspace();
+		Check.True(WorkspaceReadme.Find(workspace.Workspace) is null, "A workspace without a readme must offer nothing.");
+		Check.True(WorkspaceReadme.Find(null) is null, "No workspace means no readme.");
+		Check.True(WorkspaceReadme.Find(Path.Combine(workspace.Root, "gone")) is null, "A missing folder must not throw.");
+		workspace.Write("workspace\\docs\\README.md", "nested");
+		Check.True(WorkspaceReadme.Find(workspace.Workspace) is null, "Only the workspace root describes the project.");
+
+		var text = workspace.Write("workspace\\README.txt", "plain");
+		Check.Equal(text, WorkspaceReadme.Find(workspace.Workspace), "Fall back to a plain-text readme");
+		var markdown = workspace.Write("workspace\\README.md", "markdown");
+		Check.Equal(markdown, WorkspaceReadme.Find(workspace.Workspace), "Prefer the markdown readme");
+		Check.True(WorkspaceReadme.Find(workspace.Workspace.ToUpperInvariant())?.EndsWith("README.md", StringComparison.Ordinal) == true,
+			"Match the workspace path as Windows does, without regard to case.");
+
+		Check.True(WorkspaceReadme.Question(markdown).Contains("README.md"), "Name the file being offered.");
+		var prompt = WorkspaceReadme.Prompt(markdown);
+		Check.True(prompt.Contains("README.md") && prompt.Contains("wait for my instructions")
+			&& prompt.Contains("do not start any work yet"), "Ask only for orientation, then a stop.");
 	}
 
 	private static void CheckStorage()

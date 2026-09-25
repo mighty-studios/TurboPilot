@@ -306,6 +306,7 @@ internal static class UiChecks
 			Check.True(!window.IsSessionActive && Field<ChatService?>(window, "_chat") is null, "Ending during startup must not leave a late session behind.");
 			Check.Equal("Start or resume a session to begin.", Status(window), "Return to the initial state after canceling startup");
 			Console.WriteLine("PASS ending during startup without a ghost session");
+			await CheckReadmeOfferAsync(application, window, workspace, provider, options);
 			await CheckSessionWindowAsync(application, window, workspace, provider, options);
 			Check.Equal(0, provider.Errors.Count, "The UI provider must not hide request failures");
 		}
@@ -322,6 +323,51 @@ internal static class UiChecks
 			if (hasBrowser)
 				await exited.Task.WaitAsync(TimeSpan.FromSeconds(15));
 		}
+	}
+
+	/// <summary>
+	/// The readme offer that opens a session on a project. The check
+	/// covers the three outcomes that matter: declining sends nothing,
+	/// accepting sends the file as an attachment, and restarting the same
+	/// workspace does not ask again.
+	/// </summary>
+	private static async Task CheckReadmeOfferAsync(Application application, MainWindow window, TestWorkspace workspace,
+		LocalProvider provider, ChatSessionOptions options)
+	{
+		var readme = workspace.Write("workspace\\README.md", "Fixture document.");
+		var sent = provider.Requests.Count;
+
+		using (DialogAction<YesNoDialog>(application, dialog => Invoke(dialog, "OnNo", dialog, new RoutedEventArgs())))
+			await InvokeTask(window, "StartFromSettingsAsync", options);
+		await Check.UntilAsync(() => window.IsSessionActive && Status(window).StartsWith("Ready.."), "The declined session did not settle.", timeoutSeconds: 45);
+		Check.Equal(sent, provider.Requests.Count, "Declining the readme must send nothing");
+		await window.EndSessionAsync();
+
+		provider.Replies.Enqueue(new LocalProvider.Reply("Read the project readme."));
+		using (DialogAction<YesNoDialog>(application, dialog => Invoke(dialog, "OnYes", dialog, new RoutedEventArgs())))
+			await InvokeTask(window, "StartFromSettingsAsync", options);
+		await Check.UntilAsync(() => Status(window).StartsWith("Ready..") && window.OutputText.Contains("Read the project readme."),
+			"The readme prompt did not finish.", timeoutSeconds: 45);
+		var request = provider.Requests.Last().GetRawText();
+		Check.True(request.Contains("README.md") && request.Contains(readme.Replace("\\", "\\\\")),
+			"Send the readme as an attachment, not as inlined text.");
+		Check.True(!request.Contains("Fixture document."), "The attachment carries the content; the prompt must not.");
+
+		var asked = 0;
+		var answerAll = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(25) };
+		answerAll.Tick += (_, _) =>
+		{
+			if (application.Windows.OfType<YesNoDialog>().FirstOrDefault() is not { IsLoaded: true } dialog) return;
+			asked++;
+			Invoke(dialog, "OnNo", dialog, new RoutedEventArgs());
+		};
+		answerAll.Start();
+		try { await InvokeTask(window, "StartFromSettingsAsync", options with { ApplyInstructions = !options.ApplyInstructions }); }
+		finally { answerAll.Stop(); }
+		Check.True(window.IsSessionActive, "The restarted session must be running.");
+		Check.Equal(1, asked, "A restart may ask about the hand-off, but must not offer the readme again.");
+		await window.EndSessionAsync();
+		Console.WriteLine("PASS workspace readme offer, attachment send, and restart suppression");
 	}
 
 	private static async Task CheckSessionWindowAsync(Application application, MainWindow window, TestWorkspace workspace,

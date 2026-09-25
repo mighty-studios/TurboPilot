@@ -14,6 +14,12 @@ The **Raw** tab preserves streamed conversation text. **Rendered** supports mark
 
 The status line shows `Starting..`, `Ready..`, `Working..`, or `Waiting..`, followed by context usage in whole Ki tokens. Cloud sessions also display whole AI Credits as `AiC=<value>`.
 
+## Opening a project
+
+When a session starts on a workspace you were not already working in, TurboPilot looks for `README.md` (or `README.txt`) in the workspace root. If one is there, it offers to send it. Accepting attaches the file to an opening prompt that asks the model to read it, summarize the project in a few lines, and wait for your instructions without changing anything. Declining sends nothing.
+
+The offer is skipped when the workspace has no readme in its root, when you resume a saved session, and when a restart carries a hand-off summary forward, since that session already knows the project. Restarting the same workspace to change a model or a setting does not ask again.
+
 ## File links in Rendered output
 
 With **Link Files in Rendered Output** checked in Session Settings (the default), each completed reply is prepared for Rendered without any model: file references that resolve to a readable file become links, and referenced images get inline previews. References resolve against the workspace; a bare file name or partial path such as `MainWindow.xaml` links when exactly one workspace file matches, skipping build and tool folders such as `bin`, `obj`, and `.git`. Code blocks, inline code that is not a path, existing links, and URLs are left as written, and Raw is unchanged.
