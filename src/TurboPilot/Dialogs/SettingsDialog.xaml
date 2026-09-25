@@ -148,6 +148,9 @@
 				<CheckBox x:Name="checkLinkFiles" Content="Link Files in Rendered Output"
 						Margin="0,4,0,0"
 						ToolTip="Link mentioned local files and preview referenced images in Rendered output. Raw output is unchanged."/>
+				<CheckBox x:Name="checkPlaySounds" Content="Play Sounds"
+						Margin="0,4,0,0"
+						ToolTip="Chime when a prompt is sent, a turn finishes, and the model needs an answer"/>
 			</StackPanel>
 		</GroupBox>
 

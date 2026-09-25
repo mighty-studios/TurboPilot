@@ -6,6 +6,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using TurbolandTheme.Wpf.Controls;
 using TurboPilot.Ai;
+using TurboPilot.Tools;
 
 namespace TurboPilot.Dialogs;
 
@@ -60,6 +61,12 @@ public partial class SettingsDialog : TurbolandFloatingDialog
 
 	public bool LinkFiles { get; private set; } = true;
 
+	/// <summary>
+	/// Whether audio cues play. A presentation preference rather than a
+	/// session setting, so changing it never restarts a session.
+	/// </summary>
+	public bool PlaySounds { get; private set; } = true;
+
 	/// <summary>The chosen session options. Valid after Begin Session.</summary>
 	public ChatSessionOptions? Result { get; private set; }
 
@@ -112,6 +119,7 @@ public partial class SettingsDialog : TurbolandFloatingDialog
 		checkApplyInstructions.IsChecked = settings.ApplyInstructions;
 		checkPreloadSkills.IsChecked = settings.PreloadSkills;
 		checkLinkFiles.IsChecked = settings.LinkFiles;
+		checkPlaySounds.IsChecked = settings.PlaySounds;
 
 		PopulateModes(settings.SelectedMode);
 		UpdateServiceFields();
@@ -482,6 +490,7 @@ public partial class SettingsDialog : TurbolandFloatingDialog
 		ApplyInstructions = next.ApplyInstructions;
 		PreloadSkills = next.PreloadSkills;
 		LinkFiles = next.LinkFiles;
+		PlaySounds = checkPlaySounds.IsChecked == true;
 
 		Persist();
 
@@ -520,6 +529,10 @@ public partial class SettingsDialog : TurbolandFloatingDialog
 		settings.ApplyInstructions = ApplyInstructions;
 		settings.PreloadSkills = PreloadSkills;
 		settings.LinkFiles = LinkFiles;
+		// A presentation preference, not a session setting: it takes
+		// effect at once and never restarts anything.
+		settings.PlaySounds = PlaySounds;
+		Sounds.Enabled = PlaySounds;
 		settings.Save();
 	}
 

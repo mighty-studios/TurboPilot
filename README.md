@@ -14,6 +14,10 @@ The **Raw** tab preserves streamed conversation text. **Rendered** supports mark
 
 The status line shows `Starting..`, `Ready..`, `Working..`, or `Waiting..`, followed by context usage in whole Ki tokens. Cloud sessions also display whole AI Credits as `AiC=<value>`. Long model IDs and session IDs are shortened to keep the status line and the Past Sessions list at a readable width; hover either to see the full value.
 
+## Audio cues
+
+TurboPilot is built to sit in a narrow column beside an editor, which means you are usually reading the editor. **Play Sounds** in Session Settings (the default) chimes at the three moments worth looking back for: a prompt leaving, the model stopping to ask something, and a turn finishing. The stock Windows chimes are used, so the cues follow the system volume and mute. The setting takes effect at once and never restarts a session.
+
 ## Keeping the CLI current
 
 A session backed by the Copilot CLI checks once per run whether a newer CLI has been released, and writes one transcript line when there is:

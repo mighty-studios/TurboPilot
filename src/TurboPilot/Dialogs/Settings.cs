@@ -61,6 +61,12 @@ public sealed class Settings
 	public bool LinkFiles { get; set; } = true;
 
 	/// <summary>
+	/// Whether audio cues play when a prompt is sent, a turn finishes, or
+	/// the model needs an answer.
+	/// </summary>
+	public bool PlaySounds { get; set; } = true;
+
+	/// <summary>
 	/// Loads settings from disk. Returns a default instance if the file
 	/// doesn't exist or fails to parse.
 	/// </summary>

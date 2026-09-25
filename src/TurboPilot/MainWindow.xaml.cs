@@ -88,6 +88,10 @@ public partial class MainWindow : TurbolandWindow
 			Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TurboPilot", "webview2-default");
 		InitializeComponent();
 
+		// Cues are a saved preference, not session state, so they are live
+		// from startup rather than from the first session.
+		Sounds.Enabled = Settings.Load().PlaySounds;
+
 		// The Raw tab reads its face and ink from the same palette table the
 		// Rendered tab is styled from, using the editor pair: yellow source
 		// text on the blue field. The typeface is the theme's bundled DOS
@@ -1007,11 +1011,26 @@ public partial class MainWindow : TurbolandWindow
 			action();
 	}
 
+	/// <summary>
+	/// Recomputes the status phrase and plays the cue for any transition
+	/// worth hearing. The phrase is the state, so comparing the previous
+	/// one to the next is the whole test: a turn that ends, and a model
+	/// that stops to ask, are the two moments a user reading another
+	/// window needs to be told about.
+	/// </summary>
 	private void RefreshChatState()
 	{
+		var previous = _statusBase;
 		_statusBase = _sessionChanging ? "Starting.."
 			: _chat?.HasPendingQuestion == true ? "Waiting.."
 			: _chat?.IsWorking == true ? "Working.." : "Ready..";
+		if (_statusBase != previous && IsSessionActive)
+		{
+			if (_statusBase == "Waiting..")
+				Sounds.PlayAttention();
+			else if (_statusBase == "Ready.." && previous is "Working.." or "Waiting..")
+				Sounds.PlayTurnComplete();
+		}
 		SetSessionActive(_chat is not null);
 	}
 
@@ -1165,6 +1184,7 @@ public partial class MainWindow : TurbolandWindow
 
 		var attachments = _attachments.ToArray();
 		_sendingInput = true;
+		Sounds.PlayPromptSent();
 		SetSessionActive(IsSessionActive);
 		try
 		{

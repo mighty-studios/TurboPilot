@@ -10,6 +10,7 @@ using System.Windows.Threading;
 using Microsoft.Web.WebView2.Wpf;
 using TurboPilot.Ai;
 using TurboPilot.Dialogs;
+using TurboPilot.Tools;
 
 namespace TurboPilot.Tests;
 
@@ -259,6 +260,12 @@ internal static class UiChecks
 			Check.Equal("unsent draft", Input(window), "Restore the unsent draft with the down arrow");
 			Console.WriteLine("PASS WPF startup, Send, compact status, prompt arrows, Raw, rendered markdown, and Mermaid");
 
+			// Cues ride the same transitions the status line reports, so
+			// the question flow below exercises all three: a prompt
+			// leaves, the model stops to ask, and the turn finishes.
+			Sounds.Enabled = true;
+			var cues = new List<string>();
+			Sounds.Played = cues;
 			provider.Replies.Enqueue(new LocalProvider.Reply("", ToolName: "ask_user",
 				ToolArguments: """{"question":"Pick an option","choices":["first","second"],"allowFreeform":false}"""));
 			provider.Replies.Enqueue(new LocalProvider.Reply("UI answer accepted."));
@@ -285,7 +292,15 @@ internal static class UiChecks
 			Click(window, "buttonSend");
 			await Check.UntilAsync(() => Status(window).StartsWith("Ready..") && window.OutputText.Contains("UI answer accepted."),
 				"The in-chat answer did not complete.");
-			Console.WriteLine("PASS WPF chat questions and numbered answers without pop-up dialogs");
+			Check.True(cues.Contains("notify.wav"), "Sending a prompt must be audible.");
+			Check.True(cues.Contains("Windows Exclamation.wav"), "A model waiting on an answer must be audible.");
+			Check.True(cues.Contains("chimes.wav"), "A finished turn must be audible.");
+			Sounds.Enabled = false;
+			cues.Clear();
+			Invoke(window, "RefreshChatState");
+			Check.Equal(0, cues.Count, "Turning cues off must silence them");
+			Sounds.Played = null;
+			Console.WriteLine("PASS WPF chat questions, numbered answers without pop-up dialogs, and audio cues");
 
 			var attachments = Field<List<string>>(window, "_attachments");
 			attachments.Add(Path.Combine(workspace.Workspace, "missing.txt"));
