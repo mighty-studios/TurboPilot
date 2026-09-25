@@ -17,8 +17,11 @@
 	<StackPanel Margin="10" Width="860">
 		<Label Content="Find by session ID, workspace, summary, or prompt"/>
 		<TextBox x:Name="textSearch" TextChanged="OnSearchChanged" Margin="0,4,0,8"/>
-		<ListBox x:Name="listSessions" Height="220" DisplayMemberPath="DisplayLabel"
-				SelectionMode="Single" SelectionChanged="OnSelectionChanged"
+		<!-- Extended selection so a run of old sessions can be cleared in
+		     one pass. Resume and View still need exactly one row; only
+		     Delete reads the whole selection. -->
+		<ListBox x:Name="listSessions" Height="191" DisplayMemberPath="DisplayLabel"
+				SelectionMode="Extended" SelectionChanged="OnSelectionChanged"
 				ScrollViewer.HorizontalScrollBarVisibility="Auto">
 			<ListBox.ItemContainerStyle>
 				<Style TargetType="ListBoxItem">
@@ -28,15 +31,41 @@
 		</ListBox>
 		<!-- The details are read to be copied: a workspace path into a
 		     shell, a session ID into a file name. A read-only text box
-		     says the same thing as a label and can be selected. -->
-		<TextBox x:Name="textDetails" Margin="0,10,0,0" Height="92"
+		     says the same thing as a label and can be selected.
+
+		     It takes the editor colors rather than the field colors the
+		     list uses, so the pane reads as a place text is shown rather
+		     than another place a row can be picked.
+
+		     VerticalContentAlignment is stated because the shared field
+		     template centers its scroll viewer, which is right for a
+		     one-row field and wrong for a box with a stated height: the
+		     horizontal scroll bar would sit under the centered text
+		     instead of along the bottom edge. -->
+		<TextBox x:Name="textDetails" Margin="0,10,0,0" Height="128"
 				IsReadOnly="True" IsReadOnlyCaretVisible="True"
+				VerticalContentAlignment="Stretch"
+				Background="{DynamicResource Turboland.Brush.EditorBackground}"
+				Foreground="{DynamicResource Turboland.Brush.EditorForeground}"
+				CaretBrush="{DynamicResource Turboland.Brush.EditorForeground}"
+				SelectionBrush="{DynamicResource Turboland.Brush.EditorSelectionBackground}"
+				SelectionTextBrush="{DynamicResource Turboland.Brush.EditorSelectionForeground}"
 				TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto"
 				HorizontalScrollBarVisibility="Auto"/>
-		<StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
-			<Button Content="Cancel" IsCancel="True" Click="OnCancel" Margin="0,0,12,0"/>
-			<Button x:Name="buttonView" Content="View" Click="OnView" Margin="0,0,12,0"/>
-			<Button x:Name="buttonResume" Content="Resume" IsDefault="True" Click="OnResume"/>
-		</StackPanel>
+		<Grid Margin="0,18,0,0">
+			<Grid.ColumnDefinitions>
+				<ColumnDefinition Width="Auto"/>
+				<ColumnDefinition Width="*"/>
+				<ColumnDefinition Width="Auto"/>
+			</Grid.ColumnDefinitions>
+			<Button x:Name="buttonDelete" Grid.Column="0" Content="Delete" Click="OnDelete"/>
+			<TextBlock x:Name="textCount" Grid.Column="1" Margin="12,0"
+					VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+			<StackPanel Grid.Column="2" Orientation="Horizontal">
+				<Button Content="Cancel" IsCancel="True" Click="OnCancel" Margin="0,0,12,0"/>
+				<Button x:Name="buttonView" Content="View" Click="OnView" Margin="0,0,12,0"/>
+				<Button x:Name="buttonResume" Content="Resume" IsDefault="True" Click="OnResume"/>
+			</StackPanel>
+		</Grid>
 	</StackPanel>
 </ctl:TurbolandFloatingDialog>

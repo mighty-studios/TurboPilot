@@ -1092,7 +1092,7 @@ public partial class MainWindow : TurbolandWindow
 				return;
 			}
 
-			var dialog = new PastSessionsDialog(sessions);
+			var dialog = new PastSessionsDialog(sessions, _sessionStore, _sessionId);
 			if (dialog.ShowDialog(this) != true || dialog.SelectedSession is not { } selected)
 				return;
 			if (IsSessionActive && !YesNoDialog.Ask(this,

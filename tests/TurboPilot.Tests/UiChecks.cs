@@ -225,6 +225,7 @@ internal static class UiChecks
 			CheckTools(application, window, workspace);
 			CheckSettingsCaptions(workspace);
 			CheckPastSessionsLayout(window);
+			CheckPastSessionsDelete(application, window, workspace);
 			CheckPromptReferences(window);
 			await CheckCommandsAsync(window);
 			CheckChangeActions(application, window);
@@ -576,7 +577,8 @@ internal static class UiChecks
 	/// right-hand frame line was pushed out from under the button row.
 	/// Its height was equally open, growing with a workspace path long
 	/// enough to wrap. The details pane is also read to be copied, so it
-	/// has to be selectable text rather than a label.
+	/// has to be selectable text rather than a label, and its scroll bar
+	/// has to sit on its bottom edge rather than under its text.
 	/// </summary>
 	private static void CheckPastSessionsLayout(MainWindow window)
 	{
@@ -625,6 +627,21 @@ internal static class UiChecks
 				Check.True(details.Text.Contains(record.Options.WorkspaceFolder!),
 					"The details pane must carry the whole workspace path, since copying it is the point.");
 
+				// The shared field template centers its scroll viewer,
+				// which is right for a one-row field and wrong for a box
+				// with a stated height: the horizontal scroll bar rides
+				// with the centered text instead of the bottom edge.
+				var host = (FrameworkElement)details.Template.FindName("PART_ContentHost", details);
+				var bottom = host.TransformToAncestor(details).Transform(new Point(0, host.ActualHeight)).Y;
+				Check.True(Math.Abs(details.ActualHeight - bottom) <= 1,
+					$"The details scroll bar must sit on the bottom edge: content ends at {bottom} of {details.ActualHeight}.");
+
+				// A pane colored like the list reads as another list.
+				var list = Control<ListBox>(dialog, "listSessions");
+				Check.True(!Equals(ColorOf(details.Background), ColorOf(list.Background))
+					&& !Equals(ColorOf(details.Foreground), ColorOf(list.Foreground)),
+					"The details pane must not take the same colors as the list it sits under.");
+
 				// The window is capped, so content wider than the cap is
 				// not refused: it is squeezed, and what gives way is the
 				// frame down the right-hand side of the buttons.
@@ -638,6 +655,76 @@ internal static class UiChecks
 			}
 			finally { dialog.Close(); }
 		}
+
+		static System.Windows.Media.Color ColorOf(System.Windows.Media.Brush brush) =>
+			((System.Windows.Media.SolidColorBrush)brush).Color;
+	}
+
+	/// <summary>
+	/// Deleting is the one thing in the dialog that cannot be taken back,
+	/// so what it acts on has to be exactly what was picked. A run of
+	/// rows can be picked at once, the running session is never among
+	/// them, and only what was removed from disk leaves the list.
+	/// </summary>
+	private static void CheckPastSessionsDelete(Application application, MainWindow window, TestWorkspace workspace)
+	{
+		var directory = Path.Combine(workspace.Root, "delete-sessions");
+		Directory.CreateDirectory(directory);
+		var store = new SessionStore(directory);
+		foreach (var id in new[] { "keep-me", "doomed-one", "doomed-two" })
+		{
+			store.Create(id, new ChatSessionOptions { WorkspaceFolder = workspace.Root }, "prompt\r\n");
+			store.WriteTranscript(id, "prompt\r\n");
+			store.WriteRenderedTranscript(id, "prompt\r\n");
+		}
+
+		var sessions = store.List(out _);
+		Check.Equal(3, sessions.Count, "The store must list what was written to it");
+
+		var dialog = new PastSessionsDialog(sessions, store, "keep-me") { Owner = window };
+		try
+		{
+			TurbolandTheme.Wpf.TurbolandTheme.ApplyTo(dialog);
+			dialog.Show();
+			dialog.UpdateLayout();
+
+			var list = Control<ListBox>(dialog, "listSessions");
+			Check.True(list.SelectionMode != SelectionMode.Single,
+				"The list must take more than one row, or a run of old sessions cannot be cleared in one pass.");
+
+			// The running session is listed so it can be recognized, but
+			// its files are open: removing them would strand the session
+			// that is still writing to them.
+			list.SelectedItems.Clear();
+			list.SelectedItem = sessions.First(record => record.SessionId == "keep-me");
+			dialog.UpdateLayout();
+			Check.True(!Control<Button>(dialog, "buttonDelete").IsEnabled,
+				"The running session must not be offered for deletion.");
+			Check.True(!Control<Button>(dialog, "buttonResume").IsEnabled,
+				"The running session must not be offered for resuming.");
+
+			list.SelectedItems.Clear();
+			foreach (var record in sessions.Where(record => record.SessionId != "keep-me"))
+				list.SelectedItems.Add(record);
+			dialog.UpdateLayout();
+			Check.True(Control<Button>(dialog, "buttonDelete").IsEnabled,
+				"Two deletable rows must enable deleting.");
+			Check.True(!Control<Button>(dialog, "buttonResume").IsEnabled,
+				"Resume acts on one session, so more than one row must not offer it.");
+
+			using (DialogAction<YesNoDialog>(application, confirm => Invoke(confirm, "OnYes", confirm, new RoutedEventArgs())))
+				Invoke(dialog, "OnDelete", dialog, new RoutedEventArgs());
+
+			Check.Equal(1, list.Items.Count, "Deleted sessions must leave the list");
+			Check.Equal(1, store.List(out _).Count, "Deleted sessions must leave the store");
+			foreach (var extension in new[] { ".json", ".md", ".rendered.md" })
+				Check.True(!File.Exists(Path.Combine(directory, "doomed-one" + extension)),
+					$"Deleting must remove the '{extension}' file as well as the record.");
+			Check.True(File.Exists(Path.Combine(directory, "keep-me.json")),
+				"Deleting must leave what was not picked.");
+			Console.WriteLine("PASS Past Sessions deletes what was picked and spares the rest");
+		}
+		finally { dialog.Close(); }
 	}
 
 

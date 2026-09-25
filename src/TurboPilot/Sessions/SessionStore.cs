@@ -174,6 +174,21 @@ public sealed class SessionStore
 		return records.OrderByDescending(record => record.UpdatedAt).ToList();
 	}
 
+	/// <summary>
+	/// Removes a saved session: its metadata and both transcripts. A file
+	/// that is already gone is not an error, since the point of the call
+	/// is that none of them remain afterward.
+	/// </summary>
+	public void Delete(string sessionId)
+	{
+		foreach (var extension in new[] { ".json", ".md", ".rendered.md" })
+		{
+			var path = FilePath(sessionId, extension);
+			if (File.Exists(path))
+				File.Delete(path);
+		}
+	}
+
 	public string ReadTranscript(string sessionId) => File.ReadAllText(FilePath(sessionId, ".md"));
 	public string ReadRenderedTranscript(string sessionId)
 	{
