@@ -247,6 +247,20 @@ internal static class UiChecks
 			Click(window, "buttonSend");
 			await Check.UntilAsync(() => Status(window).StartsWith("Waiting.."), "The question did not put the UI into Waiting.");
 			Check.True(window.OutputText.Contains("1. first") && window.OutputText.Contains("2. second"), "Show choices in the transcript.");
+			var carded = false;
+			for (var attempt = 0; attempt < 100 && !carded; attempt++)
+			{
+				using var result = JsonDocument.Parse(await webView.CoreWebView2.ExecuteScriptAsync(
+					"({title: (document.querySelector('#output .kp-question .kp-card-title')||{}).textContent || ''," +
+					" body: (document.querySelector('#output .kp-question p')||{}).textContent || ''," +
+					" choices: document.querySelectorAll('#output .kp-question .kp-card-choices li').length})"));
+				carded = result.RootElement.GetProperty("title").GetString() == "Question"
+					&& result.RootElement.GetProperty("body").GetString() == "Pick an option"
+					&& result.RootElement.GetProperty("choices").GetInt32() == 2;
+				if (!carded)
+					await Task.Delay(100);
+			}
+			Check.True(carded, "The Rendered tab must draw a question as a card with its choices.");
 			Check.True(application.Windows.Count == 1, "Model questions must not create pop-up windows.");
 			SetInput(window, "2");
 			Click(window, "buttonSend");

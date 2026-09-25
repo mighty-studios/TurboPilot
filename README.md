@@ -10,7 +10,7 @@ Send a prompt with **Send** or **Ctrl+Enter**. Sending while a response is runni
 
 The **Model Output** heading sits above the Raw and Rendered tabs, and the **User Prompt** editor fills the lower pane. Drag the divider to adjust the split; both panes continue filling the window when it is resized.
 
-The **Raw** tab preserves streamed conversation text. **Rendered** supports markdown and Mermaid diagrams, plus links and image previews for local files that replies mention. Questions and permission requests appear in chat: reply with an option number or its text, or a freeform answer when offered. Invalid answers leave the question pending. Plan approval also happens in chat.
+The **Raw** tab preserves streamed conversation text. **Rendered** supports markdown and Mermaid diagrams, plus links and image previews for local files that replies mention. Questions and permission requests appear in chat: reply with an option number or its text, or a freeform answer when offered. Invalid answers leave the question pending. Plan approval also happens in chat. In **Rendered**, a question or permission request is framed as a card with its choices numbered, tool steps and errors appear as tagged status lines, and each session starts under a banner; **Raw** keeps the same information as plain lines.
 
 The status line shows `Starting..`, `Ready..`, `Working..`, or `Waiting..`, followed by context usage in whole Ki tokens. Cloud sessions also display whole AI Credits as `AiC=<value>`.
 
@@ -26,7 +26,7 @@ When the replaced session has a conversation, a confirmation offers to carry it 
 
 ## Customization and permissions
 
-TurboPilot appends its own presentation instructions after the enabled instructions and preloaded skills, without replacing the runtime's system instructions. The central, user-editable file is `%LOCALAPPDATA%\TurboPilot\instructions\turbopilot.instructions.md`, outside the workspace. It is created from bundled defaults if missing and never overwritten when it exists. Edit it to customize Markdown formatting, Mermaid diagrams, embedded images, file links, and URL links.
+TurboPilot appends its own presentation instructions after the enabled instructions and preloaded skills, without replacing the runtime's system instructions. The central, user-editable file is `%LOCALAPPDATA%\TurboPilot\instructions\turbopilot.instructions.md`, outside the workspace. It is created from bundled defaults if missing and never overwritten when it exists. The defaults require Markdown in every reply: a bold lead answer, sections, lists, tables for comparisons, backticks around literals, language-tagged fences, Mermaid diagrams for flows and structures, embedded images, file links, and URL links. Edit the file to change or relax any of it.
 
 The file is read on every new or resumed session, even when **Apply Instructions** is off (that toggle controls customization instructions only). Edits do not change an already running session or a live model switch. An empty file intentionally supplies no app guidance; deleting it restores the defaults on the next start. An unreadable file or malformed YAML header reports an error and prevents startup rather than silently dropping the instructions.
 

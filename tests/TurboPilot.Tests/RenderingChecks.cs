@@ -37,5 +37,43 @@ internal static class RenderingChecks
 		Check.True(!kept.Contains(Uri.EscapeDataString(outside)), "Do not link files outside the permitted scope.");
 		Check.Equal(0, notes.Count, "Readable files must not produce notices");
 		Console.WriteLine("PASS rule-based Rendered links, image previews, workspace name lookup, and protected regions");
+
+		CheckNotices();
+	}
+
+	private static void CheckNotices()
+	{
+		var (questionText, questionRendered) = NoticeFormatter.Question(
+			"Pick a **plan**", ["Ship it", "Keep planning"], allowFreeform: true);
+		Check.True(questionText.StartsWith("Question: Pick a **plan**", StringComparison.Ordinal)
+			&& questionText.Contains("1. Ship it  |  2. Keep planning")
+			&& questionText.Contains("(Reply with an option number, its text, or your own answer and press Send.)"),
+			"Keep the plain question line in the Raw tab.");
+		Check.True(questionRendered.StartsWith("<div class=\"kp-card kp-question\">", StringComparison.Ordinal)
+			&& questionRendered.EndsWith("</div>", StringComparison.Ordinal),
+			"Frame a question as a card.");
+		Check.True(questionRendered.Contains("</div>\r\n\r\nPick a **plan**\r\n\r\n"),
+			"Leave the question body as markdown, set off by blank lines.");
+		Check.True(questionRendered.Contains("<ol><li>Ship it</li><li>Keep planning</li></ol>"),
+			"List the choices as an ordered list.");
+
+		var (permissionText, permissionRendered) = NoticeFormatter.Permission("shell", "dir <C:\\a & b>");
+		Check.True(permissionText.StartsWith("Permission requested - shell: dir <C:\\a & b>", StringComparison.Ordinal),
+			"Keep the plain permission line in the Raw tab.");
+		Check.True(permissionRendered.Contains("<code>dir &lt;C:\\a &amp; b&gt;</code>"),
+			"Escape the requested operation and show it as code.");
+		Check.True(!permissionRendered.Contains("<C:"), "A command can never be read as markup.");
+
+		var (statusText, statusRendered) = NoticeFormatter.Status("error", "MCP <server> failed");
+		Check.Equal("[error] MCP <server> failed", statusText, "Keep the plain status line in the Raw tab");
+		Check.True(statusRendered.Contains("class=\"kp-status kp-status-error\"")
+			&& statusRendered.Contains("<span class=\"kp-status-tag\">error</span>")
+			&& statusRendered.Contains("MCP &lt;server&gt; failed"),
+			"Tag and escape a status line.");
+
+		var (bannerText, bannerRendered) = NoticeFormatter.Banner("Session 1 | model | mode");
+		Check.Equal("--- Session 1 | model | mode ---", bannerText, "Keep the plain banner in the Raw tab");
+		Check.Equal("<div class=\"kp-banner\">Session 1 | model | mode</div>", bannerRendered, "Frame a banner");
+		Console.WriteLine("PASS notice cards, status lines, and banners with escaped content");
 	}
 }

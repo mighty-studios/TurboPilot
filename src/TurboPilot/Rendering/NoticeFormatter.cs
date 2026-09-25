@@ -1,0 +1,101 @@
+using System.Text;
+
+namespace TurboPilot.Rendering;
+
+/// <summary>
+/// Builds the two forms of every transcript notice the application writes
+/// itself: the plain line shown in the Raw tab, and the marked-up form
+/// shown in the Rendered tab.
+///
+/// The Rendered form is a small block of literal HTML embedded in the
+/// markdown stream. A div on its own line opens an HTML block that ends at
+/// the following blank line, so any markdown between the opening and
+/// closing tags is still parsed normally; that matters for questions,
+/// whose text can carry a whole plan. Everything else is emitted as
+/// escaped HTML so a file path or a shell command can never be read as
+/// markup. Styling lives in web/output.css and BorlandVisionTheme.cs.
+/// </summary>
+internal static class NoticeFormatter
+{
+	/// <summary>A question with its answer choices.</summary>
+	public static (string Text, string Rendered) Question(string question, IReadOnlyList<string> choices, bool allowFreeform)
+	{
+		var hint = allowFreeform
+			? "Reply with an option number, its text, or your own answer and press Send."
+			: "Reply with an option number or its text and press Send.";
+		var text = new StringBuilder("Question: ").Append(question);
+		if (choices.Count > 0)
+			text.Append("\r\n").Append(string.Join("  |  ", choices.Select((choice, index) => $"{index + 1}. {choice}")));
+		text.Append("\r\n(").Append(hint).Append(')');
+		return (text.ToString(), Card("question", "Question", question, null, choices, hint));
+	}
+
+	/// <summary>A permission request for one operation.</summary>
+	public static (string Text, string Rendered) Permission(string kind, string? detail)
+	{
+		var label = string.IsNullOrWhiteSpace(detail) ? kind : $"{kind}: {detail}";
+		var text = $"Permission requested - {label}\r\n1. yes (allow)  |  2. no (deny)\r\nReply with an option and press Send.";
+		var rendered = Card("permission", "Permission requested", null,
+			string.IsNullOrWhiteSpace(detail)
+				? Escape(kind)
+				: Escape(kind) + ": <code>" + Escape(detail) + "</code>",
+			["yes (allow)", "no (deny)"],
+			"Reply with an option and press Send.");
+		return (text, rendered);
+	}
+
+	/// <summary>A tagged status line, such as a tool step or an error.</summary>
+	public static (string Text, string Rendered) Status(string tag, string text)
+	{
+		var rendered = new StringBuilder("<div class=\"kp-status kp-status-").Append(ClassOf(tag)).Append("\">")
+			.Append("<span class=\"kp-status-tag\">").Append(Escape(tag)).Append("</span>")
+			.Append("<span class=\"kp-status-text\">").Append(Escape(text)).Append("</span>")
+			.Append("</div>");
+		return ($"[{tag}] {text}", rendered.ToString());
+	}
+
+	/// <summary>A session banner separating one run of the transcript from the next.</summary>
+	public static (string Text, string Rendered) Banner(string text) =>
+		($"--- {text} ---", "<div class=\"kp-banner\">" + Escape(text) + "</div>");
+
+	private static string Card(string kind, string title, string? body, string? detail,
+		IReadOnlyList<string> choices, string hint)
+	{
+		var sb = new StringBuilder("<div class=\"kp-card kp-").Append(kind).Append("\">")
+			.Append("<div class=\"kp-card-title\">").Append(Escape(title)).Append("</div>");
+		if (detail is not null)
+			sb.Append("<div class=\"kp-card-detail\">").Append(detail).Append("</div>");
+		// A blank line closes the HTML block so the body is parsed as markdown.
+		sb.Append("\r\n\r\n");
+		if (!string.IsNullOrWhiteSpace(body))
+			sb.Append(body).Append("\r\n\r\n");
+		if (choices.Count > 0)
+		{
+			sb.Append("<div class=\"kp-card-choices\"><ol>");
+			foreach (var choice in choices)
+				sb.Append("<li>").Append(Escape(choice)).Append("</li>");
+			sb.Append("</ol></div>");
+		}
+		sb.Append("<div class=\"kp-card-hint\">").Append(Escape(hint)).Append("</div>")
+			.Append("</div>");
+		return sb.ToString();
+	}
+
+	/// <summary>Reduces a tag to the letters that can safely name a style class.</summary>
+	private static string ClassOf(string tag)
+	{
+		var sb = new StringBuilder(tag.Length);
+		foreach (var character in tag)
+		{
+			if (char.IsAsciiLetter(character))
+				sb.Append(char.ToLowerInvariant(character));
+		}
+		return sb.Length == 0 ? "note" : sb.ToString();
+	}
+
+	private static string Escape(string text) => text
+		.Replace("&", "&amp;")
+		.Replace("<", "&lt;")
+		.Replace(">", "&gt;")
+		.Replace("\"", "&quot;");
+}

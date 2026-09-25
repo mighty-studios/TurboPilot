@@ -188,7 +188,7 @@ public sealed class ChatService : IAsyncDisposable
 				_record.Options = _options;
 				SaveUsage();
 			}
-			AddNotice($"--- {(resumeId is null ? "Session" : "Resumed")} {SessionId} | {_options.Model} | {_options.Mode} ---");
+			AddNotice(NoticeFormatter.Banner($"{(resumeId is null ? "Session" : "Resumed")} {SessionId} | {_options.Model} | {_options.Mode}"));
 			_isWorking = false;
 			StateChanged?.Invoke();
 			UsageChanged?.Invoke();
@@ -234,7 +234,7 @@ public sealed class ChatService : IAsyncDisposable
 			if (_isWorking)
 			{
 				await InterruptAsync(session, linked.Token);
-				AddNotice("[interrupted] Previous turn stopped");
+				AddNotice(NoticeFormatter.Status("interrupted", "Previous turn stopped"));
 			}
 			// Changes requested during the previous turn apply before this prompt.
 			ChatSessionOptions? pending;
@@ -253,7 +253,7 @@ public sealed class ChatService : IAsyncDisposable
 				message.Prompt = BuildBootstrapPrompt(_record!.Bootstrap!, message.Prompt);
 			RecordUserInput(prompt, request: true);
 			if (attachmentPaths is { Count: > 0 })
-				AddNotice("[attached] " + string.Join(", ", attachmentPaths.Select(Path.GetFileName)));
+				AddNotice(NoticeFormatter.Status("attached", string.Join(", ", attachmentPaths.Select(Path.GetFileName))));
 
 			var wasWorking = _isWorking;
 			lock (_sync)
@@ -305,7 +305,7 @@ public sealed class ChatService : IAsyncDisposable
 				return;
 			}
 			await InterruptAsync(session, _lifetime.Token);
-			AddNotice("[stopped] Turn interrupted");
+			AddNotice(NoticeFormatter.Status("stopped", "Turn interrupted"));
 			StateChanged?.Invoke();
 		}
 		finally
@@ -398,7 +398,7 @@ public sealed class ChatService : IAsyncDisposable
 			RecordUserInput(answer);
 			_questions.Dequeue();
 			if (_questions.TryPeek(out var next))
-				AddNotice(next.Text);
+				AddNotice(next.Text, next.Rendered);
 			question.Completion.TrySetResult(response);
 		}
 		StateChanged?.Invoke();
@@ -429,17 +429,17 @@ public sealed class ChatService : IAsyncDisposable
 		throw new InvalidOperationException("Reply with a listed option number or its text.");
 	}
 
-	private Task<UserInputResponse> AwaitAnswerAsync(string text, IReadOnlyList<string> choices, bool allowFreeform,
-		bool isPermission = false)
+	private Task<UserInputResponse> AwaitAnswerAsync(string text, string rendered, IReadOnlyList<string> choices,
+		bool allowFreeform, bool isPermission = false)
 	{
 		lock (_sync)
 		{
 			if (!_acceptQuestions || _disposeStarted != 0)
 				return Task.FromCanceled<UserInputResponse>(new CancellationToken(canceled: true));
-			var question = new PendingQuestion(text, choices, allowFreeform, isPermission);
+			var question = new PendingQuestion(text, rendered, choices, allowFreeform, isPermission);
 			_questions.Enqueue(question);
 			if (_questions.Count == 1)
-				AddNotice(text);
+				AddNotice(text, rendered);
 			StateChanged?.Invoke();
 			return question.Completion.Task;
 		}
@@ -462,13 +462,8 @@ public sealed class ChatService : IAsyncDisposable
 		var allowFreeform = request.AllowFreeform ?? true;
 		if (choices.Length == 0 && !allowFreeform)
 			throw new InvalidOperationException("The runtime asked a question without any valid answers.");
-		var text = "Question: " + request.Question;
-		if (choices.Length > 0)
-			text += "\r\n" + string.Join("  |  ", choices.Select((choice, index) => $"{index + 1}. {choice}"));
-		text += allowFreeform
-			? "\r\n(Reply with an option number, its text, or your own answer and press Send.)"
-			: "\r\n(Reply with an option number or its text and press Send.)";
-		try { return await AwaitAnswerAsync(text, choices, allowFreeform); }
+		var (text, rendered) = NoticeFormatter.Question(request.Question, choices, allowFreeform);
+		try { return await AwaitAnswerAsync(text, rendered, choices, allowFreeform); }
 		catch (OperationCanceledException)
 		{
 			return new UserInputResponse { Answer = "(user canceled)", WasFreeform = true };
@@ -523,12 +518,10 @@ public sealed class ChatService : IAsyncDisposable
 			PermissionRequestUrl url => url.Url,
 			_ => null,
 		};
-		var label = string.IsNullOrWhiteSpace(detail) ? kind : $"{kind}: {detail}";
 		try
 		{
-			var response = await AwaitAnswerAsync(
-				$"Permission requested - {label}\r\n1. yes (allow)  |  2. no (deny)\r\nReply with an option and press Send.",
-				["yes", "no"], allowFreeform: false, isPermission: true);
+			var (text, rendered) = NoticeFormatter.Permission(kind, detail);
+			var response = await AwaitAnswerAsync(text, rendered, ["yes", "no"], allowFreeform: false, isPermission: true);
 			if (response.Answer == "yes")
 				return await PermissionHandler.ApproveAll(request, invocation);
 		}
@@ -591,7 +584,7 @@ public sealed class ChatService : IAsyncDisposable
 							QueueFormatting(message.Data.MessageId, display);
 						break;
 					case ToolExecutionStartEvent tool:
-						AddNotice($"[tool] {tool.Data.ToolName}");
+						AddNotice(NoticeFormatter.Status("tool", tool.Data.ToolName));
 						break;
 					case SessionMcpServerStatusChangedEvent server:
 						ReportServerStatus(server.Data.ServerName, server.Data.Status.Value, server.Data.Error);
@@ -601,7 +594,7 @@ public sealed class ChatService : IAsyncDisposable
 							ReportServerStatus(server.Name, server.Status.Value, server.Error);
 						break;
 					case SessionErrorEvent error:
-						AddNotice("[error] " + error.Data.Message);
+						AddNotice(NoticeFormatter.Status("error", error.Data.Message));
 						_isWorking = false;
 						_turnIdle?.TrySetResult();
 						ReleaseQuestions();
@@ -655,14 +648,23 @@ public sealed class ChatService : IAsyncDisposable
 		}
 	}
 
-	public void AddNotice(string text) => EmitTranscript("\r\n" + text + "\r\n\r\n");
+	/// <summary>
+	/// Writes one application notice. The Raw tab always shows the plain
+	/// line; when a marked-up form is supplied, the Rendered tab shows that
+	/// instead. See <see cref="NoticeFormatter"/>.
+	/// </summary>
+	public void AddNotice(string text, string? rendered = null) =>
+		EmitTranscript("\r\n" + text + "\r\n\r\n", null,
+			rendered is null ? null : "\r\n\r\n" + rendered + "\r\n\r\n");
+
+	private void AddNotice((string Text, string Rendered) notice) => AddNotice(notice.Text, notice.Rendered);
 
 	private void ReportServerStatus(string name, string status, string? error)
 	{
 		if (status is "failed" or "needs-auth")
 		{
 			if (_serverWarnings.Add(name))
-				AddNotice($"[error] MCP {name}: {error ?? status}");
+				AddNotice(NoticeFormatter.Status("error", $"MCP {name}: {error ?? status}"));
 		}
 		else
 		{
@@ -690,7 +692,7 @@ public sealed class ChatService : IAsyncDisposable
 		}
 	}
 
-	private void EmitTranscript(string text, string? messageId = null)
+	private void EmitTranscript(string text, string? messageId = null, string? rendered = null)
 	{
 		if (text.Length == 0)
 			return;
@@ -715,7 +717,7 @@ public sealed class ChatService : IAsyncDisposable
 				}
 			}
 			TranscriptReceived?.Invoke(text);
-			AppendRendered(text, messageId);
+			AppendRendered(rendered ?? text, messageId);
 		}
 	}
 
@@ -899,7 +901,7 @@ public sealed class ChatService : IAsyncDisposable
 				ContextWindowTokens = next.ContextWindowTokens;
 			SaveUsage();
 		}
-		AddNotice($"--- Changed to {_options.Model} | {_options.Mode} ---");
+		AddNotice(NoticeFormatter.Banner($"Changed to {_options.Model} | {_options.Mode}"));
 		UsageChanged?.Invoke();
 		StateChanged?.Invoke();
 		return true;
@@ -1020,7 +1022,7 @@ public sealed class ChatService : IAsyncDisposable
 		catch (OperationCanceledException) { throw; }
 		catch (Exception ex)
 		{
-			AddNotice("[warning] Context window is unavailable: " + ex.Message);
+			AddNotice(NoticeFormatter.Status("warning", "Context window is unavailable: " + ex.Message));
 			return 0;
 		}
 	}
@@ -1058,7 +1060,7 @@ public sealed class ChatService : IAsyncDisposable
 			: new AttachmentFile { Path = Path.GetFullPath(path), DisplayName = Path.GetFileName(path) };
 	}
 
-	private sealed record PendingQuestion(string Text, IReadOnlyList<string> Choices, bool AllowFreeform, bool IsPermission)
+	private sealed record PendingQuestion(string Text, string Rendered, IReadOnlyList<string> Choices, bool AllowFreeform, bool IsPermission)
 	{
 		public TaskCompletionSource<UserInputResponse> Completion { get; } =
 			new(TaskCreationOptions.RunContinuationsAsynchronously);

@@ -234,6 +234,72 @@ input[type="radio"] {
 	margin: 12px 0;
 }
 
+/* -- Application notices ------------------------------------------ *
+ *
+ * NoticeFormatter.cs writes these blocks into the Rendered stream. The
+ * Raw tab keeps the plain line, so nothing here changes what the user
+ * can copy out of the transcript.
+ */
+
+/* A framed prompt that is waiting on the user: a question or a
+   permission request. Drawn as a panel so it reads as a dialog rather
+   than as another paragraph of the answer. */
+.kp-card {
+	border: 1px solid var(--bv-panel-border-strong);
+	border-left-width: 4px;
+	padding: 6px 12px 8px;
+	margin: 10px 0;
+}
+.kp-card-title {
+	text-transform: uppercase;
+	letter-spacing: 1px;
+	margin-bottom: 4px;
+}
+.kp-card-detail {
+	margin-bottom: 4px;
+	word-break: break-all;
+}
+.kp-card-choices ol {
+	margin: 4px 0 6px 24px;
+}
+.kp-card-choices li {
+	padding: 1px 0;
+}
+.kp-card-hint {
+	margin-top: 4px;
+}
+/* The body is markdown, so it arrives wrapped in its own paragraphs. */
+.kp-card > p:first-of-type {
+	margin-top: 4px;
+}
+
+/* A tagged one-line status: a tool step, an error, an attachment. */
+.kp-status {
+	margin: 2px 0;
+	display: flex;
+	gap: 8px;
+	align-items: baseline;
+}
+.kp-status-tag {
+	flex: none;
+	min-width: 88px;
+	text-transform: uppercase;
+}
+.kp-status-text {
+	word-break: break-word;
+}
+
+/* The rule that separates one run of the session from the next. */
+.kp-banner {
+	border-top: 1px solid var(--bv-panel-border-strong);
+	border-bottom: 1px solid var(--bv-panel-border-strong);
+	padding: 3px 0;
+	margin: 12px 0;
+	text-align: center;
+	text-transform: uppercase;
+	letter-spacing: 1px;
+}
+
 #output img {
 	max-width: 100%;
 	border: 1px solid var(--bv-panel-border);

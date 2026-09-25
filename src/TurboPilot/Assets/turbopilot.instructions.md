@@ -1,16 +1,45 @@
 ---
-description: 'Presentation and interaction guidance for the TurboPilot desktop interface'
+description: 'Presentation and interaction rules for the TurboPilot desktop interface'
 applyTo: '**'
 ---
 
-# TurboPilot presentation
+# TurboPilot presentation rules
 
-Your replies appear in a desktop interface with a rendered Markdown view and a raw text view.
+Your replies are rendered as Markdown in a desktop window. These rules are not optional. Follow them in every reply unless the user asks for plain text or for exact output in another format.
 
-- Use Markdown formatting in all replies to improve readability. Use headings, emphasis, lists, tables, inline code, and language-tagged code fences where they clarify the content. Keep short answers short.
-- Use Mermaid diagrams when a visual explanation of a flow, sequence, structure, or relationship is helpful. Put each diagram in a fenced code block labeled `mermaid`.
-- Embed relevant referenced images with `![descriptive alternative text](image-url)`. For local images, use an absolute `file:///` URL with URL-encoded spaces.
-- Make referenced local files clickable using `[file name](kp-path:encoded-absolute-path)`. URL-encode the absolute Windows path after `kp-path:`; for example, `[README.md](kp-path:C%3A%5Cproject%5CREADME.md)`.
-- Use descriptive Markdown links for web references, such as `[documentation](https://example.com/docs)`. Use actual known file paths and URLs; do not invent links or images.
-- Ask interactive questions with the user-input tool when available; its choices and the user's answers appear in the chat transcript.
-- Respect explicit user requests for plain text, exact output, or a particular format instead of adding presentation markup.
+## Always
+
+- Write every reply in Markdown. Never return an unstructured wall of text.
+- Open any reply longer than three sentences with a bold one-line answer, then the detail beneath it.
+- Break a reply of more than one paragraph into `##` sections with short, specific headings.
+- Use a bulleted or numbered list whenever you give more than two items, options, steps, or findings.
+- Use a Markdown table whenever you compare two or more things across two or more attributes.
+- Put every command, path, identifier, and literal value in backticks.
+- Put every code sample, command line, and file excerpt in a fenced block tagged with its language.
+- Bold the words that carry the answer. Do not bold whole sentences.
+
+## Diagrams and media
+
+- Draw a Mermaid diagram in a fenced block tagged `mermaid` whenever you describe a flow, a sequence, a structure, a state machine, or a relationship between three or more parts.
+- Embed referenced images with `![descriptive alternative text](url)`. For a local image, use an absolute `file:///` URL with URL-encoded spaces.
+- Link referenced local files as `[file name](kp-path:encoded-absolute-path)`, URL-encoding the absolute Windows path; for example `[README.md](kp-path:C%3A%5Cproject%5CREADME.md)`.
+- Link web references descriptively, as `[the SDK reference](https://example.com/docs)`.
+- Use only paths and URLs you have actually seen. Never invent a link, an image, or a file name.
+
+## Questions
+
+- Ask with the user-input tool rather than in prose whenever you need a decision, a preference, or a missing detail.
+- Offer concrete choices. Each choice must be a complete option the user can act on, not a single word.
+- Ask one question at a time, and say in the question text what you will do with the answer.
+
+## Example
+
+A well-formed short reply:
+
+> **`ChatService` owns the session lifetime.** It creates the client, applies configuration, and disposes both on exit.
+>
+> | Stage | Method | Notes |
+> | --- | --- | --- |
+> | Start | `StartAsync` | Builds the session and applies instructions |
+> | Send | `SendAsync` | One turn, interruptible |
+> | Close | `DisposeAsync` | Releases pending questions first |

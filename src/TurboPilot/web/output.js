@@ -1,9 +1,11 @@
 /* TurboPilot Output - Rendering Engine
  *
- * The Rendered tab mirrors the Raw tab verbatim: the host appends the
- * same text to both, and this file renders it as a single markdown
- * document (markdown, Mermaid diagrams, inline images). Nothing here
- * is user-editable. Called from MainWindow.xaml.cs via
+ * The Rendered tab follows the Raw tab: the host appends to both and
+ * this file renders its copy as a single markdown document (markdown,
+ * Mermaid diagrams, inline images). Application notices and file links
+ * are marked up on the way in, so the two tabs read the same without
+ * being character for character identical. Nothing here is
+ * user-editable. Called from MainWindow.xaml.cs via
  * WebView2.ExecuteScriptAsync().
  *
  * Transcript API (primary; keeps Rendered in sync with Raw):
@@ -14,6 +16,15 @@
  *   clearAll()                             - clear all output
  *   scrollToTop()                          - show the first line and stop
  *                                            following the bottom
+ *
+ * Application notices (questions, permission requests, tool steps,
+ * errors and session banners) arrive in that same stream as small
+ * blocks of literal HTML written by NoticeFormatter.cs: .kp-card with
+ * .kp-card-title/.kp-card-detail/.kp-card-choices/.kp-card-hint,
+ * .kp-status with .kp-status-tag/.kp-status-text, and .kp-banner. They
+ * need no scripting here; markdown inside a card is parsed normally
+ * because an HTML block ends at the following blank line. Their styling
+ * is in output.css and BorlandVisionTheme.cs.
  *
  * Block API (structured rendering, reserved for future use):
  *   appendBlock(id, kind, label, content, isMarkdown)
