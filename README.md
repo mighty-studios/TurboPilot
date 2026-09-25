@@ -14,6 +14,16 @@ The **Raw** tab preserves streamed conversation text. **Rendered** supports mark
 
 The status line shows `Starting..`, `Ready..`, `Working..`, or `Waiting..`, followed by context usage in whole Ki tokens. Cloud sessions also display whole AI Credits as `AiC=<value>`. Long model IDs and session IDs are shortened to keep the status line and the Past Sessions list at a readable width; hover either to see the full value.
 
+## Following the agent's plan
+
+When the agent plans work as a list of steps, the status line says where it is:
+
+```
+Working.. [2/5] Writing tests    32Ki
+```
+
+The full list prints once in the transcript as a checklist card, and is corrected in place as the agent revises it rather than reprinted. `[x]` is finished, `[>]` is the step in progress, `[!]` is blocked, `[ ]` is not started. Each turn gets its own checklist. A plan of a single step is not reported: the position would say nothing the prompt did not.
+
 ## Audio cues
 
 TurboPilot is built to sit in a narrow column beside an editor, which means you are usually reading the editor. **Play Sounds** in Session Settings (the default) chimes at the three moments worth looking back for: a prompt leaving, the model stopping to ask something, and a turn finishing. The stock Windows chimes are used, so the cues follow the system volume and mute. The setting takes effect at once and never restarts a session.

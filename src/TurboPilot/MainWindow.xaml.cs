@@ -1121,11 +1121,19 @@ public partial class MainWindow : TurbolandWindow
 			return;
 		}
 
-		statusTextBlock.Text = FormatStatus(_statusBase, _ctxUsed, _ctxTotal, _aic, _showAic);
+		statusTextBlock.Text = FormatStatus(_statusBase, _ctxUsed, _ctxTotal, _aic, _showAic, _chat?.Progress);
 	}
 
-	internal static string FormatStatus(string status, int used, int total, double credits, bool showCredits)
+	/// <summary>
+	/// The status line: the state phrase, then where the agent is in its
+	/// plan, then context use and credits. Progress comes before the
+	/// numbers because it is the part the user is reading for.
+	/// </summary>
+	internal static string FormatStatus(string status, int used, int total, double credits, bool showCredits,
+		TaskProgress? progress = null)
 	{
+		if (progress?.StatusFragment is { Length: > 0 } fragment)
+			status += " " + fragment;
 		if (total > 0)
 			status += $" {used / 1024}/{total / 1024}K";
 		if (showCredits)

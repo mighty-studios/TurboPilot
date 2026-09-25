@@ -273,6 +273,23 @@ input[type="radio"] {
 	margin-top: 4px;
 }
 
+/* The agent's plan: one line per step, its state in an ASCII box. */
+.kp-plan-steps {
+	margin: 4px 0 2px 0;
+}
+.kp-plan-step {
+	display: flex;
+	gap: 8px;
+	padding: 1px 0;
+}
+.kp-plan-box {
+	flex: none;
+	white-space: pre;
+}
+.kp-plan-title {
+	flex: 1 1 auto;
+}
+
 /* A tagged one-line status: a tool step, an error, an attachment. */
 .kp-status {
 	margin: 2px 0;

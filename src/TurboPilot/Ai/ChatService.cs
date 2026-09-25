@@ -45,6 +45,9 @@ public sealed class ChatService : IAsyncDisposable
 	private ChatSessionOptions? _pendingChanges;
 	// Injected by checks so the update notice can be exercised offline.
 	internal Func<CancellationToken, Task<string?>>? _cliVersionLookup;
+	private IReadOnlyList<PlanStep> _plan = [];
+	private string? _planMessageId;
+	private Task _planTail = Task.CompletedTask;
 	private const int HandoffRecentRequests = 4;
 	private const int HandoffRequestChars = 2000;
 
@@ -72,6 +75,13 @@ public sealed class ChatService : IAsyncDisposable
 	public event Action<string>? ErrorReceived;
 	public event Action? StateChanged;
 	public event Action? UsageChanged;
+
+	/// <summary>
+	/// Where the agent is in its plan, or null when it has not made one.
+	/// Read by the status line; changes are announced by
+	/// <see cref="StateChanged"/>.
+	/// </summary>
+	public TaskProgress? Progress { get; private set; }
 
 	public string? SessionId { get; private set; }
 	public string Model => _options.Model;
@@ -611,6 +621,12 @@ public sealed class ChatService : IAsyncDisposable
 				{
 					case AssistantTurnStartEvent:
 						_isWorking = true;
+						// A new turn gets its own checklist. Revising the
+						// one from the previous turn would rewrite history
+						// the user has already scrolled past.
+						_planMessageId = null;
+						_plan = [];
+						Progress = null;
 						if (_turnIdle is null || _turnIdle.Task.IsCompleted)
 							_turnIdle = new(TaskCreationOptions.RunContinuationsAsynchronously);
 						StateChanged?.Invoke();
@@ -641,6 +657,9 @@ public sealed class ChatService : IAsyncDisposable
 						break;
 					case SessionStartEvent start when !_options.UseByok:
 						CheckCliVersion(start.Data.CopilotVersion);
+						break;
+					case SessionTodosChangedEvent:
+						RefreshPlan();
 						break;
 					case SessionMcpServerStatusChangedEvent server:
 						ReportServerStatus(server.Data.ServerName, server.Data.Status.Value, server.Data.Error);
@@ -714,6 +733,81 @@ public sealed class ChatService : IAsyncDisposable
 			rendered is null ? null : "\r\n\r\n" + rendered + "\r\n\r\n");
 
 	private void AddNotice((string Text, string Rendered) notice) => AddNotice(notice.Text, notice.Rendered);
+
+	/// <summary>
+	/// Rereads the agent's plan and shows it two ways: a position in the
+	/// status line, and a checklist in the transcript.
+	///
+	/// The event is a bare signal, so the rows have to be fetched, which
+	/// is why this runs off the event thread and in sequence. Bursts are
+	/// common while an agent revises a plan, and reads that overtake each
+	/// other would leave the display on whichever answer happened to
+	/// arrive last rather than the latest one.
+	/// </summary>
+	private void RefreshPlan()
+	{
+		if (_disposeStarted != 0 || _session is null)
+			return;
+		var session = _session;
+		var token = _lifetime.Token;
+		var previous = _planTail;
+		_planTail = Task.Run(async () =>
+		{
+			try
+			{
+				await previous.ConfigureAwait(false);
+				token.ThrowIfCancellationRequested();
+				var result = await session.Rpc.Plan.ReadSqlTodosAsync(token).ConfigureAwait(false);
+				var steps = result.Rows
+					.Select(row => new PlanStep(row.Title ?? "", row.Status ?? ""))
+					.Where(step => step.Title.Length > 0)
+					.ToList();
+				ShowPlan(steps);
+			}
+			catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+			catch (Exception)
+			{
+				// A plan is a progress display. A session that cannot
+				// report one still works, so this stays quiet.
+			}
+		});
+	}
+
+	internal void ShowPlan(IReadOnlyList<PlanStep> steps)
+	{
+		lock (_sync)
+		{
+			if (_plan.SequenceEqual(steps))
+				return;
+			// A plan the agent has torn down entirely leaves the status
+			// line rather than printing an empty checklist.
+			var hadPlan = _plan.Count > 0;
+			_plan = steps;
+			Progress = TaskProgress.From(steps);
+			if (steps.Count > 0)
+			{
+				var checklist = NoticeFormatter.Checklist(steps);
+				// The card is written once and then revised in place, so
+				// an agent that reorders its plan six times leaves one
+				// checklist behind rather than six.
+				if (_planMessageId is null)
+				{
+					_planMessageId = "plan:" + Guid.NewGuid().ToString("N");
+					EmitTranscript("\r\n" + checklist.Text + "\r\n\r\n", _planMessageId,
+						"\r\n\r\n" + checklist.Rendered + "\r\n\r\n");
+				}
+				else
+				{
+					ReplaceRendered(_planMessageId, checklist.Rendered);
+				}
+			}
+			else if (hadPlan)
+			{
+				_planMessageId = null;
+			}
+		}
+		StateChanged?.Invoke();
+	}
 
 	/// <summary>
 	/// Looks up the latest Copilot CLI release off the event thread and

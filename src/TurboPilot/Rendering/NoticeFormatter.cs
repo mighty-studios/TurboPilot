@@ -58,6 +58,31 @@ internal static class NoticeFormatter
 	public static (string Text, string Rendered) Banner(string text) =>
 		($"--- {text} ---", "<div class=\"kp-banner\">" + Escape(text) + "</div>");
 
+	/// <summary>
+	/// The agent's plan as a checklist. Each step carries its state in a
+	/// box drawn from ASCII, so the Raw tab reads the same as the
+	/// Rendered one and neither depends on a font that has the glyphs.
+	/// </summary>
+	public static (string Text, string Rendered) Checklist(IReadOnlyList<PlanStep> steps)
+	{
+		var text = new StringBuilder("Plan:");
+		var rendered = new StringBuilder("<div class=\"kp-card kp-plan\">")
+			.Append("<div class=\"kp-card-title\">Plan</div>")
+			.Append("<div class=\"kp-plan-steps\">");
+		foreach (var step in steps)
+		{
+			var box = step.IsDone ? "[x]" : step.IsRunning ? "[>]" : step.IsBlocked ? "[!]" : "[ ]";
+			var state = step.IsDone ? "done" : step.IsRunning ? "running" : step.IsBlocked ? "blocked" : "pending";
+			text.Append("\r\n").Append(box).Append(' ').Append(step.Title);
+			rendered.Append("<div class=\"kp-plan-step kp-plan-").Append(state).Append("\">")
+				.Append("<span class=\"kp-plan-box\">").Append(box).Append("</span>")
+				.Append("<span class=\"kp-plan-title\">").Append(Escape(step.Title)).Append("</span>")
+				.Append("</div>");
+		}
+		rendered.Append("</div></div>");
+		return (text.ToString(), rendered.ToString());
+	}
+
 	private static string Card(string kind, string title, string? body, string? detail,
 		IReadOnlyList<string> choices, string hint)
 	{

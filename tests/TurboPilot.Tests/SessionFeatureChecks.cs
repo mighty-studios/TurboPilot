@@ -2,6 +2,7 @@ using System.IO;
 using GitHub.Copilot;
 using TurboPilot.Ai;
 using TurboPilot.Permissions;
+using TurboPilot.Rendering;
 using TurboPilot.Sessions;
 
 namespace TurboPilot.Tests;
@@ -29,8 +30,52 @@ internal static class SessionFeatureChecks
 		await CheckLiveChangesAsync(workspace, provider, options);
 		await CheckHandoffAsync(workspace, provider, options);
 		await CheckAgenticLinksAsync(workspace, provider, options);
+		await CheckPlanAsync(workspace, provider, options);
 		Check.Equal(0, provider.Errors.Count, "The loopback provider must not hide failures: " + string.Join(" | ", provider.Errors));
 		Console.WriteLine("PASS session features: Rendered links, live changes, and SDK hand-off restarts");
+	}
+
+	/// <summary>
+	/// The plan checklist. An agent revises its plan repeatedly, so the
+	/// card has to be written once and then corrected, not reprinted. In
+	/// Rendered that means one card holding the latest state; Raw is a
+	/// literal record of the stream and keeps the plan as first stated,
+	/// which is the same asymmetry file links already have.
+	/// </summary>
+	private static async Task CheckPlanAsync(TestWorkspace workspace, LocalProvider provider, ChatSessionOptions options)
+	{
+		await using var chat = workspace.CreateChat();
+		await chat.StartAsync(options);
+		Check.True(chat.Progress is null, "A session with no plan reports no progress.");
+
+		chat.ShowPlan([new("Reading the code", "in_progress"), new("Writing tests", "pending")]);
+		Check.Equal("[1/2] Reading the code", chat.Progress!.StatusFragment, "Report the first step");
+		Check.Equal(1, Occurrences(chat.RenderedTranscript, "kp-plan-steps"), "Write one plan card");
+		Check.True(chat.Transcript.Contains("[>] Reading the code"), "Raw must carry the plan as an ASCII checklist.");
+
+		chat.ShowPlan([new("Reading the code", "done"), new("Writing tests", "in_progress")]);
+		Check.Equal("[2/2] Writing tests", chat.Progress!.StatusFragment, "Follow the agent to the next step");
+		Check.Equal(1, Occurrences(chat.RenderedTranscript, "kp-plan-steps"), "Revise the card rather than repeat it");
+		Check.True(chat.RenderedTranscript.Contains("kp-plan-running")
+			&& !chat.RenderedTranscript.Contains(">[>] Reading the code"), "The revised card must show the current state.");
+
+		var before = chat.RenderedTranscript;
+		chat.ShowPlan([new("Reading the code", "done"), new("Writing tests", "in_progress")]);
+		Check.Equal(before, chat.RenderedTranscript, "An unchanged plan must not touch the transcript");
+
+		chat.ShowPlan([new("Reading the code", "done"), new("Writing tests", "done")]);
+		Check.True(chat.Progress!.Complete && chat.Progress.StatusFragment.Length == 0,
+			"A finished plan leaves the status line.");
+		Console.WriteLine("PASS plan checklist written once, revised in place, and reported in the status line");
+
+		static int Occurrences(string text, string value)
+		{
+			var count = 0;
+			for (var index = text.IndexOf(value, StringComparison.Ordinal); index >= 0;
+				index = text.IndexOf(value, index + value.Length, StringComparison.Ordinal))
+				count++;
+			return count;
+		}
 	}
 
 	private static void CheckClassification(TestWorkspace workspace, ChatSessionOptions options)

@@ -415,5 +415,56 @@ internal static class CoreChecks
 		Check.Equal("Working.. 20/128K AiC=13", MainWindow.FormatStatus("Working..", 20480, 131072, 13, true), "Compact cloud status");
 		Check.Equal("Ready.. 20/128K", MainWindow.FormatStatus("Ready..", 20480, 131072, 13, false), "Hide credits for other providers");
 		Check.Equal("Waiting..", MainWindow.FormatStatus("Waiting..", 0, 0, 0, false), "Do not invent an unknown context limit");
+		CheckTaskProgress();
+	}
+
+	/// <summary>
+	/// Where the agent is in its plan. The status line is the only place
+	/// progress can go in a narrow window, so the fragment has to be both
+	/// short and correct about which step is current.
+	/// </summary>
+	private static void CheckTaskProgress()
+	{
+		Check.True(TaskProgress.From([]) is null, "No plan means no progress to report.");
+		Check.True(TaskProgress.From([new("Only step", "pending")]) is null,
+			"One step is not a plan worth a position.");
+
+		var steps = new PlanStep[]
+		{
+			new("Reading the code", "done"),
+			new("Writing tests", "in_progress"),
+			new("Updating docs", "pending"),
+		};
+		var progress = TaskProgress.From(steps)!;
+		Check.Equal(2, progress.Position, "The running step is the position");
+		Check.Equal(3, progress.Total, "Count every step");
+		Check.Equal("[2/3] Writing tests", progress.StatusFragment, "Say which step, out of how many, and its name");
+		Check.Equal("Working.. [2/3] Writing tests 20/128K",
+			MainWindow.FormatStatus("Working..", 20480, 131072, 0, false, progress),
+			"Put progress before the numbers, where it is read");
+
+		// Nothing marked running: the first unfinished step is where the
+		// work stands, whether it is merely pending or actually blocked.
+		Check.Equal(2, TaskProgress.From([new("A", "done"), new("B", "pending"), new("C", "pending")])!.Position,
+			"Fall back to the first unfinished step");
+		Check.Equal(2, TaskProgress.From([new("A", "done"), new("B", "blocked"), new("C", "pending")])!.Position,
+			"A blocked step is still where the work stands");
+
+		var finished = TaskProgress.From([new("A", "done"), new("B", "done")])!;
+		Check.True(finished.Complete, "Recognize a finished plan.");
+		Check.Equal("", finished.StatusFragment, "A finished plan is not where the user is");
+		Check.Equal("Ready.. 20/128K", MainWindow.FormatStatus("Ready..", 20480, 131072, 0, false, finished),
+			"Leave the status line alone once the plan is done");
+
+		Check.True(TaskProgress.From([new("A", "done"), new(new string('t', 200), "in_progress")])!
+			.StatusFragment.Length < 44, "A long step title must not push the status line out of the window.");
+
+		var (text, rendered) = NoticeFormatter.Checklist(steps);
+		Check.Equal("Plan:\r\n[x] Reading the code\r\n[>] Writing tests\r\n[ ] Updating docs", text,
+			"Raw shows the plan as an ASCII checklist");
+		Check.True(rendered.Contains("kp-plan-done") && rendered.Contains("kp-plan-running")
+			&& rendered.Contains("kp-plan-pending"), "Rendered must mark each step with its state.");
+		Check.True(NoticeFormatter.Checklist([new("<b>not markup</b>", "pending")]).Rendered
+			.Contains("&lt;b&gt;not markup&lt;/b&gt;"), "A step title must never be read as markup.");
 	}
 }
