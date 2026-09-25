@@ -30,7 +30,7 @@ public partial class PastSessionsDialog : TurbolandFloatingDialog
 		var search = textSearch.Text.Trim();
 		listSessions.ItemsSource = _sessions.Where(session =>
 			session.SessionId.Contains(search, StringComparison.OrdinalIgnoreCase)
-			|| session.Summary.Contains(search, StringComparison.OrdinalIgnoreCase)
+			|| session.ArchiveSentence.Contains(search, StringComparison.OrdinalIgnoreCase)
 			|| session.Description.Contains(search, StringComparison.OrdinalIgnoreCase)
 			|| (session.Options.WorkspaceFolder?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false))
 			.ToList();
@@ -66,10 +66,11 @@ public partial class PastSessionsDialog : TurbolandFloatingDialog
 		};
 		// The row already shows the summary clipped. The opening prompt is
 		// only worth the space when there is no summary to have shown.
-		if (string.IsNullOrWhiteSpace(selected.Summary) && !string.IsNullOrWhiteSpace(selected.Description))
+		var sentence = selected.ArchiveSentence;
+		if (sentence.Length > 0)
+			lines.Add($"Summary: {sentence}");
+		else if (!string.IsNullOrWhiteSpace(selected.Description))
 			lines.Add($"Opening prompt: {selected.Description}");
-		else if (!string.IsNullOrWhiteSpace(selected.Summary))
-			lines.Add($"Summary: {selected.Summary}");
 
 		textDetails.Text = string.Join("\r\n", lines);
 	}

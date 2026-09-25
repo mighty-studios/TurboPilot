@@ -429,9 +429,13 @@ internal static class CoreChecks
 		Check.True(record.DisplayLabel.EndsWith("Reworked the Past Sessions listing.", StringComparison.Ordinal),
 			"A summary says what the session turned out to be, so it wins over the opening prompt.");
 
+		record.Summary = "1.";
+		record.Description = "Rework the listing";
+		Check.True(record.DisplayLabel.EndsWith("Rework the listing", StringComparison.Ordinal),
+			"A fragment stored by an earlier build is declined rather than shown.");
+
 		record.Summary = "";
-		record.Description = "";
-		Check.True(record.DisplayLabel.Length < 90 && record.DisplayLabel.Contains("workspace-"),
+		record.Description = "";		Check.True(record.DisplayLabel.Length < 90 && record.DisplayLabel.Contains("workspace-"),
 			"A row with nothing said about it still names its session.");
 
 		var homeless = new SessionRecord { SessionId = "s1", Options = new ChatSessionOptions() };
@@ -449,18 +453,49 @@ internal static class CoreChecks
 		Check.Equal("The session reworked the Past Sessions listing.",
 			ChatService.ArchiveLine("## Overview\r\n\r\nThe session reworked the Past Sessions listing. It also added tests."),
 			"Take the first sentence and leave the heading behind");
+
+		// The reported failure: a numbered step's marker was read as a
+		// whole sentence and the row recorded "1.".
+		Check.Equal("Reworked the Past Sessions listing to lead with the summary.",
+			ChatService.ArchiveLine("1. Reworked the Past Sessions listing to lead with the summary. 2. Added tests."),
+			"A step number is structure, not a sentence");
+		Check.Equal("Reworked the Past Sessions listing to lead with the summary.",
+			ChatService.ArchiveLine("## Work done\r\n\r\n1) **Reworked** the Past Sessions listing to lead with the summary.\r\n2) Added tests."),
+			"Either step marker comes off, with the emphasis around it");
+		Check.Equal("Reworked the listing and moved the model into the details.",
+			ChatService.ArchiveLine("- Reworked the listing and moved the model into the details."),
+			"A bullet is structure too");
+
 		Check.Equal("The session added a summary written at shutdown.",
 			ChatService.ArchiveLine("- **The session** added a `summary` written at shutdown."),
 			"Strip the decoration a row would otherwise show literally");
 		Check.Equal("Work continued on the e.g. archive line.",
 			ChatService.ArchiveLine("Work continued on the e.g. archive line. More followed."),
 			"An abbreviation is not the end of the sentence");
+
 		Check.Equal("", ChatService.ArchiveLine(""), "Nothing said yields nothing stored");
 		Check.Equal("", ChatService.ArchiveLine("# Heading\r\n\r\n## Another"), "Headings alone say nothing about a session");
-		Check.True(ChatService.ArchiveLine(new string('w', 400)).Length <= 200,
-			"A sentence that never ends is still bounded.");
-		Check.True(!ChatService.ArchiveLine("First line\r\nsecond line. Third.").Contains('\n'),
-			"A row is one line, so the sentence must be one line.");
+		Check.Equal("", ChatService.ArchiveLine("Summary:\r\n\r\n1.\r\n2."), "A row must never record a bare step marker");
+		Check.Equal("", ChatService.ArchiveLine("Done."), "A fragment is not a sentence");
+		Check.Equal("", ChatService.ArchiveLine(new string('w', 400)),
+			"One unbroken word is not a sentence however long it runs");
+
+		var long_ = ChatService.ArchiveLine(string.Join(" ", Enumerable.Repeat("work continued steadily", 60)));
+		Check.True(long_.Length <= 200, "A sentence that never ends is still bounded.");
+
+		foreach (var sample in new[]
+		{
+			"## Overview\r\n\r\n1. Reworked the Past Sessions listing to lead with the summary.\r\n2. Added tests.",
+			"First line\r\nsecond line of the same thought. Third.",
+			"> Quoted the session summary across two lines\r\n> of a wrapped block quote.",
+		})
+		{
+			var line = ChatService.ArchiveLine(sample);
+			Check.True(!line.Contains('\n') && !line.Contains('\r'),
+				"A row is one line, so the sentence must never carry a break: " + line);
+			Check.True(line.Length == 0 || ChatService.ArchiveLine(line) == line,
+				"A stored sentence must survive being distilled again: " + line);
+		}
 	}
 
 	/// <summary>

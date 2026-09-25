@@ -9,7 +9,7 @@ using System.Text.Json;
 
 namespace TurboPilot.Ai;
 
-public sealed class ChatService : IAsyncDisposable
+public sealed partial class ChatService : IAsyncDisposable
 {
 	private readonly object _sync = new();
 	private readonly SemaphoreSlim _lifecycle = new(1, 1);
@@ -1331,48 +1331,72 @@ public sealed class ChatService : IAsyncDisposable
 	}
 
 	/// <summary>
-	/// The one sentence taken from a hand-off summary. The summarizer
-	/// writes prose with markdown in it and leads with what the session
-	/// was about, so the opening sentence is the line worth keeping;
-	/// decoration is stripped because a list row shows it literally.
+	/// The one sentence kept for the archive.
+	///
+	/// The summarizer writes structured prose: headings, numbered steps,
+	/// bullets and markdown emphasis. A Past Sessions row shows one line
+	/// literally, so all of that has to come off and exactly one sentence
+	/// has to come out. Anything that does not amount to a sentence is
+	/// rejected rather than stored, because a row reading "1." is worse
+	/// than a row falling back to the opening prompt.
 	/// </summary>
 	internal static string ArchiveLine(string summary)
 	{
 		var flat = new StringBuilder();
-		foreach (var line in (summary ?? "").Replace("\r\n", "\n").Split('\n'))
+		foreach (var raw in (summary ?? "").Replace("\r\n", "\n").Split('\n'))
 		{
-			var trimmed = line.Trim().TrimStart('#', '-', '*', '>', ' ').Replace("**", "").Replace("`", "");
-			if (trimmed.Length == 0) continue;
-			// A heading is a label for what follows, not a statement about
-			// the session, so it is skipped rather than reported as one.
-			if (line.TrimStart().StartsWith('#') || (trimmed.Length < 40 && !trimmed.Contains(' '))) continue;
+			// Quote marks, bullets and step numbers are structure. Left in,
+			// the leading "1." of a numbered step reads as a whole sentence.
+			var line = StripMarkers().Replace(raw.Trim(), "");
+			line = line.Replace("**", "").Replace("__", "").Replace("`", "").Trim();
+			if (line.Length == 0) continue;
+			// A heading labels what follows rather than saying anything
+			// about the session, and so does a bare "Overview:".
+			if (raw.TrimStart().StartsWith('#') || !line.Contains(' ') || line.EndsWith(':')) continue;
 			if (flat.Length > 0) flat.Append(' ');
-			flat.Append(trimmed);
-			if (flat.Length > 400) break;
+			flat.Append(line);
+			if (flat.Length > 600) break;
 		}
 
 		var text = string.Join(" ", flat.ToString().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+		// Steps written on one line keep their markers in the middle,
+		// where the leading-marker strip cannot reach them.
+		text = StripInlineMarkers().Replace(text, " ");
 
-		// A sentence ends at a terminator that is followed by the end of
-		// the text or by a new sentence. Inside "e.g." the terminator is
-		// followed by a letter, and after it by a lowercase word, so
-		// neither is mistaken for the end.
+		// A sentence ends at a terminator followed by the end of the text
+		// or by a new sentence, and is long enough to be one. Inside
+		// "e.g." the terminator is followed by a letter, and after it by a
+		// lowercase word, so neither ends the sentence.
 		for (var i = 0; i < text.Length; i++)
 		{
 			if (text[i] is not ('.' or '!' or '?')) continue;
-			if (i + 1 >= text.Length)
-				break;
-			if (text[i + 1] != ' ')
-				continue;
-			var next = i + 2;
-			if (next < text.Length && !char.IsUpper(text[next]))
-				continue;
+			if (i + 1 < text.Length)
+			{
+				if (text[i + 1] != ' ') continue;
+				if (i + 2 < text.Length && char.IsLower(text[i + 2])) continue;
+			}
+			if (!IsSentence(text[..(i + 1)])) continue;
 			text = text[..(i + 1)];
 			break;
 		}
 
-		return ShortText.Clip(text, 200);
+		text = ShortText.Clip(text, 200);
+		return IsSentence(text) ? text : "";
 	}
+
+	/// <summary>
+	/// Whether a candidate is worth showing as what a session was about.
+	/// A fragment left over from a list marker or a stray label is not.
+	/// </summary>
+	internal static bool IsSentence(string text) =>
+		text.Length >= 20 && char.IsLetter(text[0])
+		&& text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length >= 4;
+
+	[System.Text.RegularExpressions.GeneratedRegex(@"^(?:[#>*+\-\u2022]+\s*|\d+[.)]\s+)+")]
+	private static partial System.Text.RegularExpressions.Regex StripMarkers();
+
+	[System.Text.RegularExpressions.GeneratedRegex(@"(?<=[.!?])\s+\d+[.)]\s+")]
+	private static partial System.Text.RegularExpressions.Regex StripInlineMarkers();
 
 	public void SetBootstrap(SummaryBootstrap bootstrap)
 	{

@@ -67,6 +67,19 @@ public sealed class SessionRecord
 	public bool BootstrapPending { get; set; }
 
 	/// <summary>
+	/// The one sentence a row may show, or nothing. The check is repeated
+	/// here rather than trusted from the file: a record written before
+	/// the distiller was corrected can hold a fragment, and a stored
+	/// value is not worth a migration when reading it can simply decline
+	/// to show it.
+	/// </summary>
+	[JsonIgnore]
+	public string ArchiveSentence =>
+		!string.IsNullOrWhiteSpace(Summary) && !Summary.AsSpan().ContainsAny('\r', '\n')
+			&& Ai.ChatService.IsSentence(Summary.Trim())
+			? Summary.Trim() : "";
+
+	/// <summary>
 	/// The Past Sessions row: when the session last ran, the folder it
 	/// ran against, and what it was about. The model and the settings are
 	/// left to the details pane, because they are the same across most
@@ -82,7 +95,7 @@ public sealed class SessionRecord
 	{
 		get
 		{
-			var said = !string.IsNullOrWhiteSpace(Summary) ? Rendering.ShortText.Clip(Summary, 96)
+			var said = ArchiveSentence is { Length: > 0 } sentence ? Rendering.ShortText.Clip(sentence, 96)
 				: !string.IsNullOrWhiteSpace(Description) ? Rendering.ShortText.Clip(Description, 96)
 				: Rendering.ShortText.SessionId(SessionId, 24);
 			var workspace = Rendering.ShortText.Workspace(Options.WorkspaceFolder);
