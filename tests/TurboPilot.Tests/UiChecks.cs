@@ -346,7 +346,8 @@ internal static class UiChecks
 			Console.WriteLine("PASS ending during startup without a ghost session");
 			await CheckReadmeOfferAsync(application, window, workspace, provider, options);
 			await CheckSessionWindowAsync(application, window, workspace, provider, options);
-			Check.Equal(0, provider.Errors.Count, "The UI provider must not hide request failures");
+			Check.Equal(0, provider.Errors.Count, "The UI provider must not hide request failures: "
+				+ string.Join(" | ", provider.Errors.Distinct()));
 		}
 		finally
 		{

@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using TurboPilot.Ai;
 
 namespace TurboPilot.Tests;
 
@@ -212,7 +213,7 @@ internal sealed class LocalProvider : IAsyncDisposable
 	/// sends in instructions of its own.
 	/// </summary>
 	private static bool MentionsArchivePrompt(JsonElement request) =>
-		request.GetRawText().Contains("in exactly one plain sentence", StringComparison.OrdinalIgnoreCase);
+		request.GetRawText().Contains(ChatService.ArchiveMarker, StringComparison.OrdinalIgnoreCase);
 
 	private static async Task WriteAsync(HttpListenerResponse response, string text)
 	{

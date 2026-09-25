@@ -286,10 +286,10 @@ internal static class SessionFeatureChecks
 			var before = provider.Requests.Count;
 			var transcript = chat.Transcript;
 			provider.Replies.Enqueue(new LocalProvider.Reply(
-				"**Documented** the readme without touching code."));
+				"I **documented** the readme without touching code."));
 			var line = await chat.ArchiveAsync();
-			Check.Equal("Documented the readme without touching code.", line,
-				"Keep one plain sentence out of what the model wrote");
+			Check.Equal("Documented the readme without touching code", line,
+				"Keep one short plain label out of what the model wrote");
 			Check.Equal(before + 1, provider.Requests.Count, "Ask the session model once");
 			Check.True(chat.Transcript == transcript,
 				"The archive turn is not part of the conversation, so it must leave the transcript alone.");
@@ -321,8 +321,24 @@ internal static class SessionFeatureChecks
 			await RuntimeChecks.SendAndWaitAsync(resumed, "Carry on.");
 			provider.Replies.Enqueue(new LocalProvider.Reply("Done."));
 			Check.True(await resumed.ArchiveAsync() is null, "A fragment is not a summary.");
-			Check.Equal("Documented the readme without touching code.", workspace.Store.Load(sessionId).Summary,
+			Check.Equal("Documented the readme without touching code", workspace.Store.Load(sessionId).Summary,
 				"A session that could not summarize keeps the line it already had");
+		}
+
+		// Closed in the middle of a turn. Interrupting the user's own
+		// work to ask for a list row is not worth the delay it costs.
+		await using (var busy = workspace.CreateChat())
+		{
+			await busy.ResumeAsync(sessionId, options);
+			var held = new LocalProvider.Reply("Still working.", Hold: true);
+			provider.Replies.Enqueue(held);
+			await busy.SendAsync("Start something long.");
+			await held.Started.Task.WaitAsync(TimeSpan.FromSeconds(15));
+
+			var before = provider.Requests.Count;
+			Check.True(await busy.ArchiveAsync() is null && provider.Requests.Count == before,
+				"A session closed mid-turn must end rather than ask for a summary.");
+			held.Release.TrySetResult();
 		}
 	}
 

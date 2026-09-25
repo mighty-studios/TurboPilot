@@ -425,8 +425,8 @@ internal static class CoreChecks
 		Check.True(record.DisplayLabel.Contains("TurboPilot"), "A row must name the folder the session ran against.");
 		Check.True(!record.DisplayLabel.Contains('m'), "The model belongs in the details, not in the row.");
 
-		record.Summary = "Reworked the Past Sessions listing.";
-		Check.True(record.DisplayLabel.EndsWith("Reworked the Past Sessions listing.", StringComparison.Ordinal),
+		record.Summary = "Reworked the Past Sessions listing";
+		Check.True(record.DisplayLabel.EndsWith("Reworked the Past Sessions listing", StringComparison.Ordinal),
 			"A summary says what the session turned out to be, so it wins over the opening prompt.");
 
 		record.Summary = "1.";
@@ -448,53 +448,70 @@ internal static class CoreChecks
 	/// with markdown in it, and a list row shows whatever it is given
 	/// literally, so what matters is that one plain sentence comes out.
 	/// </summary>
+	/// <summary>
+	/// The one line the archive keeps. The model is asked for a short
+	/// label, but an answer can still arrive narrated, decorated or
+	/// stepped, and a list row shows whatever it is given literally. What
+	/// has to hold is that one short plain label comes out, and that
+	/// nothing which is not one is stored at all.
+	/// </summary>
 	private static void CheckArchiveLine()
 	{
-		Check.Equal("The session reworked the Past Sessions listing.",
+		Check.Equal("Reworked the Past Sessions listing",
 			ChatService.ArchiveLine("## Overview\r\n\r\nThe session reworked the Past Sessions listing. It also added tests."),
-			"Take the first sentence and leave the heading behind");
+			"Take the first sentence, leave the heading behind and drop the subject every row shares");
 
 		// The reported failure: a numbered step's marker was read as a
 		// whole sentence and the row recorded "1.".
-		Check.Equal("Reworked the Past Sessions listing to lead with the summary.",
+		Check.Equal("Reworked the Past Sessions listing to lead with the summary",
 			ChatService.ArchiveLine("1. Reworked the Past Sessions listing to lead with the summary. 2. Added tests."),
 			"A step number is structure, not a sentence");
-		Check.Equal("Reworked the Past Sessions listing to lead with the summary.",
+		Check.Equal("Reworked the Past Sessions listing to lead with the summary",
 			ChatService.ArchiveLine("## Work done\r\n\r\n1) **Reworked** the Past Sessions listing to lead with the summary.\r\n2) Added tests."),
 			"Either step marker comes off, with the emphasis around it");
-		Check.Equal("Reworked the listing and moved the model into the details.",
+		Check.Equal("Reworked the listing and moved the model into the details",
 			ChatService.ArchiveLine("- Reworked the listing and moved the model into the details."),
 			"A bullet is structure too");
 
-		Check.Equal("The session added a summary written at shutdown.",
+		Check.Equal("Added a summary written at shutdown",
 			ChatService.ArchiveLine("- **The session** added a `summary` written at shutdown."),
 			"Strip the decoration a row would otherwise show literally");
-		Check.Equal("Work continued on the e.g. archive line.",
+		Check.Equal("Work continued on the e.g. archive line",
 			ChatService.ArchiveLine("Work continued on the e.g. archive line. More followed."),
 			"An abbreviation is not the end of the sentence");
+
+		// A row is scanned among others, so the subject it shares with
+		// every other row is width spent saying nothing.
+		Check.Equal("Read and summarized README then wrote a short story about a robot assistant",
+			ChatService.ArchiveLine("I read and summarized README then wrote a short story about a robot assistant."),
+			"A narrated opener is dropped and the line reads as a label");
+		Check.Equal("Reworked the archive summary",
+			ChatService.ArchiveLine("In this session we reworked the archive summary."),
+			"A wordier opener comes off the same way");
 
 		Check.Equal("", ChatService.ArchiveLine(""), "Nothing said yields nothing stored");
 		Check.Equal("", ChatService.ArchiveLine("# Heading\r\n\r\n## Another"), "Headings alone say nothing about a session");
 		Check.Equal("", ChatService.ArchiveLine("Summary:\r\n\r\n1.\r\n2."), "A row must never record a bare step marker");
-		Check.Equal("", ChatService.ArchiveLine("Done."), "A fragment is not a sentence");
+		Check.Equal("", ChatService.ArchiveLine("Done."), "A fragment is not a label");
 		Check.Equal("", ChatService.ArchiveLine(new string('w', 400)),
-			"One unbroken word is not a sentence however long it runs");
+			"One unbroken word is not a label however long it runs");
 
 		var long_ = ChatService.ArchiveLine(string.Join(" ", Enumerable.Repeat("work continued steadily", 60)));
-		Check.True(long_.Length <= 200, "A sentence that never ends is still bounded.");
+		Check.True(long_.Length is > 0 and <= 100, "A line that never ends is cut to what a row can show: " + long_);
 
 		foreach (var sample in new[]
 		{
 			"## Overview\r\n\r\n1. Reworked the Past Sessions listing to lead with the summary.\r\n2. Added tests.",
 			"First line\r\nsecond line of the same thought. Third.",
 			"> Quoted the session summary across two lines\r\n> of a wrapped block quote.",
+			"I read and summarized README then wrote a short story about a robot assistant.",
 		})
 		{
 			var line = ChatService.ArchiveLine(sample);
 			Check.True(!line.Contains('\n') && !line.Contains('\r'),
-				"A row is one line, so the sentence must never carry a break: " + line);
+				"A row is one line, so the label must never carry a break: " + line);
 			Check.True(line.Length == 0 || ChatService.ArchiveLine(line) == line,
-				"A stored sentence must survive being distilled again: " + line);
+				"A stored label must survive being distilled again: " + line);
 		}
 	}
 

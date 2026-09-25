@@ -34,6 +34,7 @@ public sealed partial class ChatService : IAsyncDisposable
 	private long _sessionAicNano;
 	private TaskCompletionSource? _turnIdle;
 	private StringBuilder? _capture;
+	private int _preparingHandoff;
 	private Task? _disposeTask;
 	private AgentMode _agentMode;
 	private bool _startAttempted;
@@ -1251,21 +1252,29 @@ public sealed partial class ChatService : IAsyncDisposable
 		if (_isWorking || HasPendingQuestion)
 			await AbortAsync().ConfigureAwait(false);
 		using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
-#pragma warning disable GHCP001
-		var result = await session.Rpc.History.SummarizeForHandoffAsync(linked.Token).ConfigureAwait(false);
-#pragma warning restore GHCP001
-		var summary = HandoffSummary(result.Summary ?? "");
-		string[] requests;
-		lock (_sync)
+		Interlocked.Increment(ref _preparingHandoff);
+		try
 		{
-			// Requests carried into this session come first, so a chain of restarts keeps the original opening request.
-			var all = new List<string>(_record?.Bootstrap?.RecentRequests ?? []);
-			all.AddRange(_record?.Requests ?? []);
-			IEnumerable<string> chosen = all.Count <= HandoffRecentRequests + 1 ? all : [all[0], .. all.TakeLast(HandoffRecentRequests)];
-			requests = chosen.Select(request => request.Length > HandoffRequestChars ? request[..HandoffRequestChars] + " [...]" : request).ToArray();
+#pragma warning disable GHCP001
+			var result = await session.Rpc.History.SummarizeForHandoffAsync(linked.Token).ConfigureAwait(false);
+#pragma warning restore GHCP001
+			var summary = HandoffSummary(result.Summary ?? "");
+			string[] requests;
+			lock (_sync)
+			{
+				// Requests carried into this session come first, so a chain of restarts keeps the original opening request.
+				var all = new List<string>(_record?.Bootstrap?.RecentRequests ?? []);
+				all.AddRange(_record?.Requests ?? []);
+				IEnumerable<string> chosen = all.Count <= HandoffRecentRequests + 1 ? all : [all[0], .. all.TakeLast(HandoffRecentRequests)];
+				requests = chosen.Select(request => request.Length > HandoffRequestChars ? request[..HandoffRequestChars] + " [...]" : request).ToArray();
+			}
+			return string.IsNullOrWhiteSpace(summary) && requests.Length == 0 ? null
+				: new SummaryBootstrap(SessionId, _options.WorkspaceFolder, summary) { RecentRequests = requests };
 		}
-		return string.IsNullOrWhiteSpace(summary) && requests.Length == 0 ? null
-			: new SummaryBootstrap(SessionId, _options.WorkspaceFolder, summary) { RecentRequests = requests };
+		finally
+		{
+			Interlocked.Decrement(ref _preparingHandoff);
+		}
 	}
 
 	// The summarizer writes its working analysis before the summary itself; only the summary is carried.
@@ -1290,12 +1299,35 @@ public sealed partial class ChatService : IAsyncDisposable
 	/// the answer is spelled out because the answer is not read by a
 	/// person: it is put straight into a list row, which shows whatever
 	/// it is given on one line.
+	///
+	/// A worked example does more than the instruction alone. Asked only
+	/// for one sentence, a model narrates in the first person and writes
+	/// to the width it is given; shown what a row wants, it writes a
+	/// label. The row is scanned among others, so the fewer words
+	/// carrying the same meaning, the better it reads.
 	/// </summary>
 	internal const string ArchivePrompt =
-		"Summarize this entire session in exactly one plain sentence, written in the past tense, "
-		+ "saying what was actually worked on and what came of it. "
-		+ "Reply with that sentence and nothing else: no preamble, no heading, no list, no markdown, "
-		+ "no line breaks, and no tool calls. Keep it under 200 characters.";
+		"Summarize this entire session as " + ArchiveMarker + ", "
+		+ "in the past tense, saying only what was worked on. "
+		+ "Write it as an action, not as a narration: no \"I\", no \"we\", no \"the session\", "
+		+ "and no words about reading, understanding or discussing unless that was the work. "
+		+ "Example: \"Read and summarized README then wrote a short story about a robot assistant\". "
+		+ "Reply with that one line and nothing else: no preamble, no heading, no list, no markdown, "
+		+ "no line breaks, and no tool calls. Keep it under 100 characters.";
+
+	/// <summary>
+	/// The phrase that identifies the archive request once it is on the
+	/// wire. It is part of the prompt rather than beside it, so the two
+	/// cannot be reworded apart.
+	/// </summary>
+	internal const string ArchiveMarker = "one short label for a list of past sessions";
+
+	/// <summary>
+	/// How long a row's summary may run. A list is read by scanning it,
+	/// so a line long enough to need reading defeats the purpose. The
+	/// prompt above states the same bound in words.
+	/// </summary>
+	private const int ArchiveMaxChars = 100;
 
 	/// <summary>
 	/// Records one sentence saying what the session was about, asked of
@@ -1316,9 +1348,10 @@ public sealed partial class ChatService : IAsyncDisposable
 	/// written to the saved transcript, because the user did not ask it.
 	///
 	/// Everything about it is best effort. A session that sent nothing
-	/// has nothing to say, and a failure, a timeout or a runtime already
-	/// on its way down leaves the previous line in place rather than
-	/// holding up the shutdown it is part of.
+	/// has nothing to say, a session closed in the middle of a turn is
+	/// left alone rather than interrupted for a list row, and a failure,
+	/// a timeout or a runtime already on its way down leaves the previous
+	/// line in place rather than holding up the shutdown it is part of.
 	/// </summary>
 	public async Task<string?> ArchiveAsync(CancellationToken cancellationToken = default)
 	{
@@ -1336,8 +1369,15 @@ public sealed partial class ChatService : IAsyncDisposable
 
 		try
 		{
-			if (_isWorking || HasPendingQuestion)
-				await AbortAsync().ConfigureAwait(false);
+			// A turn still in flight is a turn the user cut short by
+			// closing. Interrupting it and asking a fresh question in its
+			// place does not reliably answer and delays a shutdown that
+			// was already asked for, so the session keeps whatever line
+			// it had and ends. A hand-off being written for a replacement
+			// session stands in the same way: it is already asking the
+			// model to sum the session up, for something the user is
+			// waiting on.
+			if (_isWorking || HasPendingQuestion || Volatile.Read(ref _preparingHandoff) > 0) return null;
 
 			using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
 			linked.CancelAfter(ArchiveTimeout);
@@ -1436,7 +1476,16 @@ public sealed partial class ChatService : IAsyncDisposable
 			break;
 		}
 
-		text = ShortText.Clip(text, 200);
+		// A model asked for a label still narrates sometimes. The subject
+		// is the same on every row, so it distinguishes none of them and
+		// only costs width the summary itself could have used.
+		var trimmed = StripNarration().Replace(text, "");
+		if (trimmed.Length > 0 && trimmed != text)
+			text = char.ToUpperInvariant(trimmed[0]) + trimmed[1..];
+
+		// A row is scanned rather than read, so the trailing stop earns
+		// nothing and the space it sits in is worth more to the words.
+		text = ShortText.Clip(text.TrimEnd(), ArchiveMaxChars).TrimEnd('.');
 		return IsSentence(text) ? text : "";
 	}
 
@@ -1445,14 +1494,24 @@ public sealed partial class ChatService : IAsyncDisposable
 	/// A fragment left over from a list marker or a stray label is not.
 	/// </summary>
 	internal static bool IsSentence(string text) =>
-		text.Length >= 20 && char.IsLetter(text[0])
-		&& text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length >= 4;
+		text.Length >= 15 && char.IsLetter(text[0])
+		&& text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length >= 3;
 
 	[System.Text.RegularExpressions.GeneratedRegex(@"^(?:[#>*+\-\u2022]+\s*|\d+[.)]\s+)+")]
 	private static partial System.Text.RegularExpressions.Regex StripMarkers();
 
 	[System.Text.RegularExpressions.GeneratedRegex(@"(?<=[.!?])\s+\d+[.)]\s+")]
 	private static partial System.Text.RegularExpressions.Regex StripInlineMarkers();
+
+	/// <summary>
+	/// The narrating opener a model falls back into: "I read the readme",
+	/// "In this session we reworked". Every row has the same subject, so
+	/// dropping it loses nothing and buys back the width.
+	/// </summary>
+	[System.Text.RegularExpressions.GeneratedRegex(
+		@"^(?:In\s+this\s+session,?\s+|This\s+session,?\s+|The\s+session\s+|The\s+user\s+|I\s+|We\s+|You\s+)+",
+		System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
+	private static partial System.Text.RegularExpressions.Regex StripNarration();
 
 	public void SetBootstrap(SummaryBootstrap bootstrap)
 	{
