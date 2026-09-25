@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text.Json;
 using TurboPilot.Rendering;
 
 namespace TurboPilot.Tests;
@@ -75,5 +76,66 @@ internal static class RenderingChecks
 		Check.Equal("--- Session 1 | model | mode ---", bannerText, "Keep the plain banner in the Raw tab");
 		Check.Equal("<div class=\"kp-banner\">Session 1 | model | mode</div>", bannerRendered, "Frame a banner");
 		Console.WriteLine("PASS notice cards, status lines, and banners with escaped content");
+
+		CheckToolDetail();
+	}
+
+	/// <summary>
+	/// Tool calls in the transcript. What matters is that the headline
+	/// says what the tool was actually asked to do, that the detail is
+	/// bounded no matter what the tool was handed, and that nothing a
+	/// tool touched can be read as markup.
+	/// </summary>
+	private static void CheckToolDetail()
+	{
+		static JsonElement Args(string json) => JsonDocument.Parse(json).RootElement;
+
+		var shell = ToolDetail.Describe("powershell", Args("""{"command":"cd D:\\repo && git status"}"""), "git status");
+		Check.Equal("git status", shell.Headline, "Prefer the command the shell driver will actually run");
+		Check.True(shell.Body.Contains("command: cd D:\\repo && git status"),
+			"The full arguments stay available behind the headline.");
+
+		var read = ToolDetail.Describe("view", Args("""{"path":"src\\App.cs","view_range":[1,40]}"""), null);
+		Check.Equal("src\\App.cs", read.Headline, "Fall back to the path when there is no command");
+		Check.True(read.Body.Contains("view_range: 1, 40"), "An array argument reads as a list.");
+
+		var edit = ToolDetail.Describe("edit",
+			Args("""{"path":"a.cs","old_str":"var x = 1;","new_str":"var x = 2;"}"""), null);
+		Check.True(edit.Body.Contains("- var x = 1;") && edit.Body.Contains("+ var x = 2;"),
+			"An edit reads as the change it makes, not as two quoted blobs.");
+
+		var wide = ToolDetail.Describe("powershell", Args($$"""{"command":"{{new string('x', 400)}}"}"""), null);
+		Check.True(wide.Headline.Length <= ToolDetail.HeadlineBudget, "A headline stays on one line.");
+		var tall = ToolDetail.Describe("view",
+			Args($$"""{"note":"{{string.Join("\\n", Enumerable.Repeat("line", 500))}}"}"""), null);
+		Check.True(tall.Body.Length <= ToolDetail.BodyBudget + 8, "The detail block is bounded.");
+
+		var multiline = ToolDetail.Describe("powershell", Args("""{"command":"one\n  two"}"""), null);
+		Check.Equal("one two", multiline.Headline, "A headline collapses the whitespace in its value");
+
+		Check.Equal(string.Empty, ToolDetail.Describe("ask_user", null, null).Headline,
+			"A tool called with nothing reports nothing rather than guessing");
+		Check.Equal("Failed.", ToolDetail.Outcome(false, null, "ignored"),
+			"A failure with no message still says it failed");
+		Check.Equal("Boom", ToolDetail.Outcome(false, "Boom", null), "A failure reports its message");
+		Check.Equal("done", ToolDetail.Outcome(true, null, "done"), "Success reports what the tool returned");
+
+		var running = NoticeFormatter.Tool("powershell", "git status", "command: git status");
+		Check.Equal("[tool] powershell  git status", running.Text, "Keep one plain tool line in the Raw tab");
+		Check.True(running.Rendered.Contains("kp-tool-running") && running.Rendered.Contains("<details><summary>"),
+			"A running tool is a card whose detail is shut until asked for.");
+		Check.True(!running.Rendered.Contains("<details open"), "Tool detail must never open itself.");
+
+		var failed = NoticeFormatter.Tool("powershell", "rm <x>", "command: rm <x>", "failed", "No such <file>");
+		Check.True(failed.Rendered.Contains("kp-tool-failed")
+			&& failed.Rendered.Contains("rm &lt;x&gt;")
+			&& failed.Rendered.Contains("No such &lt;file&gt;"),
+			"A failed tool is marked as such and cannot inject markup.");
+
+		var bare = NoticeFormatter.Tool("ask_user", "", "", "ok", "");
+		Check.Equal("[tool] ask_user", bare.Text, "A tool with nothing to show still names itself");
+		Check.True(bare.Rendered.Contains("No detail was reported."),
+			"An empty disclosure says so rather than opening onto nothing.");
+		Console.WriteLine("PASS tool calls summarized, bounded, escaped, and shut by default");
 	}
 }

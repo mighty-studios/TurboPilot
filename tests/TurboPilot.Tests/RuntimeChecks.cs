@@ -182,6 +182,19 @@ internal static class RuntimeChecks
 				Check.True(toolResults.TryDequeue(out var approved) && approved.Success
 					&& JsonSerializer.Serialize(approved.Result).Contains("TurboPilotPermissionProbe"),
 					"Execute the approved fixture command: " + JsonSerializer.Serialize(approved));
+
+				// The transcript has to say what the tool did, not merely
+				// that one ran. A denied call and an approved call both
+				// leave a card, and each says how it ended.
+				Check.True(resumed.Transcript.Contains("[tool] powershell  Write-Output TurboPilotPermissionProbe"),
+					"Name the command a shell tool ran, not just the tool: " + resumed.Transcript);
+				Check.True(resumed.RenderedTranscript.Contains("kp-tool-ok")
+					&& resumed.RenderedTranscript.Contains("TurboPilotPermissionProbe"),
+					"An approved tool card must carry its outcome.");
+				Check.True(resumed.RenderedTranscript.Contains("kp-tool-failed"),
+					"A denied tool card must be marked as failed.");
+				Check.True(!resumed.RenderedTranscript.Contains("<details open"),
+					"Tool detail must stay shut until the reader asks for it.");
 			}
 			finally
 			{

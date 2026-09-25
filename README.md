@@ -14,8 +14,21 @@ The **Raw** tab preserves streamed conversation text. **Rendered** supports mark
 
 The status line shows `Starting..`, `Ready..`, `Working..`, or `Waiting..`, followed by context usage in whole Ki tokens. Cloud sessions also display whole AI Credits as `AiC=<value>`. Long model IDs and session IDs are shortened to keep the status line and the Past Sessions list at a readable width; hover either to see the full value.
 
-## Typed commands
+## Seeing what the agent did
 
+Every tool the agent runs leaves a card in the transcript. The headline is the one line worth seeing at a glance: the shell command, the file being read, the pattern being searched. Click it to open the full arguments and whatever the tool reported back.
+
+```
+[+] powershell  git status --short
+[+] view  src/TurboPilot/MainWindow.xaml.cs
+[+] edit  src/TurboPilot/MainWindow.xaml.cs
+```
+
+An edit shows as the change it makes, with the removed lines marked `-` and the added lines `+`, rather than two quoted blocks to compare by eye. A tool that failed is colored as such and also writes a plain line to the transcript, so a failure is never reachable only by opening a card.
+
+Detail is bounded: a tool handed a very large file leaves a card the same size as any other, with the cut marked.
+
+## Typed commands
 Type `/` in the prompt box and a list of commands opens above it. Arrow keys move, `Tab` or `Enter` completes, `Esc` dismisses. `Ctrl+Enter` still sends whatever is typed.
 
 | Command | Does |

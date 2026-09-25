@@ -84,6 +84,43 @@ internal static class NoticeFormatter
 	}
 
 	/// <summary>
+	/// A tool call. The headline is the one line worth seeing without
+	/// asking; everything else is behind a disclosure, shut by default,
+	/// because a turn can run twenty tools and a transcript that showed
+	/// all of them in full would be unreadable.
+	///
+	/// The disclosure is plain HTML rather than script, so it works the
+	/// same in a saved copy of the transcript as it does on screen.
+	/// </summary>
+	public static (string Text, string Rendered) Tool(string name, string headline, string body,
+		string? state = null, string? outcome = null)
+	{
+		var kind = state switch
+		{
+			"ok" => "kp-tool-ok",
+			"failed" => "kp-tool-failed",
+			_ => "kp-tool-running",
+		};
+		var text = new StringBuilder("[tool] ").Append(name);
+		if (headline.Length > 0)
+			text.Append("  ").Append(headline);
+
+		var rendered = new StringBuilder("<div class=\"kp-card kp-tool ").Append(kind).Append("\">")
+			.Append("<details><summary>")
+			.Append("<span class=\"kp-tool-name\">").Append(Escape(name)).Append("</span>")
+			.Append("<span class=\"kp-tool-head\">").Append(Escape(headline)).Append("</span>")
+			.Append("</summary>");
+		if (body.Length > 0)
+			rendered.Append("<pre class=\"kp-tool-body\">").Append(Escape(body)).Append("</pre>");
+		if (!string.IsNullOrEmpty(outcome))
+			rendered.Append("<pre class=\"kp-tool-outcome\">").Append(Escape(outcome)).Append("</pre>");
+		if (body.Length == 0 && string.IsNullOrEmpty(outcome))
+			rendered.Append("<div class=\"kp-tool-outcome\">No detail was reported.</div>");
+		rendered.Append("</details></div>");
+		return (text.ToString(), rendered.ToString());
+	}
+
+	/// <summary>
 	/// A block of already-aligned text under a heading, for listings the
 	/// program writes itself. The body keeps its own spacing: it is laid
 	/// out in columns before it gets here, and reflowing it would undo

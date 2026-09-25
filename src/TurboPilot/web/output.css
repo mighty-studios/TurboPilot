@@ -273,6 +273,42 @@ input[type="radio"] {
 	margin-top: 4px;
 }
 
+/* A tool call: a headline always visible, the arguments and the output
+   behind a disclosure that is shut until the reader asks. */
+.kp-tool > details > summary {
+	cursor: pointer;
+	display: flex;
+	gap: 8px;
+	list-style: none;
+}
+.kp-tool > details > summary::-webkit-details-marker {
+	display: none;
+}
+.kp-tool > details > summary::before {
+	content: "[+]";
+	flex: none;
+	white-space: pre;
+}
+.kp-tool > details[open] > summary::before {
+	content: "[-]";
+}
+.kp-tool-name {
+	flex: none;
+}
+.kp-tool-head {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.kp-tool-body,
+.kp-tool-outcome {
+	margin: 4px 0 0 0;
+	padding: 0;
+	white-space: pre-wrap;
+	word-break: break-word;
+	font: inherit;
+}
+
 /* A listing the program wrote itself: columns already aligned in the
    text, so the spacing is kept and the block scrolls rather than wraps. */
 .kp-listing-body {

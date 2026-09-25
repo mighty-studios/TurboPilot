@@ -48,6 +48,12 @@ public sealed class ChatService : IAsyncDisposable
 	private IReadOnlyList<PlanStep> _plan = [];
 	private string? _planMessageId;
 	private Task _planTail = Task.CompletedTask;
+
+	// Tool calls awaiting their outcome, so the completion can be
+	// written into the card the start opened rather than printed as a
+	// second entry the reader has to pair up by eye.
+	private sealed record ToolRecord(string Name, string Headline, string Body);
+	private readonly Dictionary<string, ToolRecord> _toolCalls = [];
 	private const int HandoffRecentRequests = 4;
 	private const int HandoffRequestChars = 2000;
 
@@ -627,6 +633,9 @@ public sealed class ChatService : IAsyncDisposable
 						_planMessageId = null;
 						_plan = [];
 						Progress = null;
+						// A tool call that never reported an outcome cannot
+						// get one now, and holding its record would leak.
+						_toolCalls.Clear();
 						if (_turnIdle is null || _turnIdle.Task.IsCompleted)
 							_turnIdle = new(TaskCreationOptions.RunContinuationsAsynchronously);
 						StateChanged?.Invoke();
@@ -653,7 +662,10 @@ public sealed class ChatService : IAsyncDisposable
 							QueueFormatting(message.Data.MessageId, display);
 						break;
 					case ToolExecutionStartEvent tool:
-						AddNotice(NoticeFormatter.Status("tool", tool.Data.ToolName));
+						ShowToolStart(tool.Data);
+						break;
+					case ToolExecutionCompleteEvent done:
+						ShowToolComplete(done.Data);
 						break;
 					case SessionStartEvent start when !_options.UseByok:
 						CheckCliVersion(start.Data.CopilotVersion);
@@ -829,6 +841,59 @@ public sealed class ChatService : IAsyncDisposable
 			EmitTranscript("\r\n" + checklist.Text + "\r\n\r\n", _planMessageId,
 				"\r\n\r\n" + checklist.Rendered + "\r\n\r\n");
 		}
+	}
+
+	/// <summary>
+	/// Prints the tool call that is starting. The card carries the
+	/// headline and the arguments, and is kept under the tool call id
+	/// so the outcome can be written into the same card rather than
+	/// printed as a second entry the reader has to pair up by eye.
+	/// </summary>
+	private void ShowToolStart(ToolExecutionStartData data)
+	{
+		var name = string.IsNullOrWhiteSpace(data.ToolName) ? "tool" : data.ToolName;
+		// The shell driver strips a redundant leading directory change
+		// before spawning, and the headline should say what actually
+		// runs. The property is marked for evaluation; the fallback
+		// below covers it going away.
+#pragma warning disable GHCP001
+		var shellCommand = data.ShellToolInfo?.DisplayCommand;
+#pragma warning restore GHCP001
+		var described = ToolDetail.Describe(name, data.Arguments, shellCommand);
+		var card = NoticeFormatter.Tool(name, described.Headline, described.Body);
+		lock (_sync)
+		{
+			var id = "tool:" + (data.ToolCallId ?? Guid.NewGuid().ToString("N"));
+			_toolCalls[id] = new ToolRecord(name, described.Headline, described.Body);
+			EmitTranscript("\r\n" + card.Text + "\r\n\r\n", id, "\r\n\r\n" + card.Rendered + "\r\n\r\n");
+		}
+	}
+
+	/// <summary>
+	/// Finishes the card a tool call opened: marks it done or failed and
+	/// files the output inside it.
+	///
+	/// Raw is a record of the stream and stays as first printed, except
+	/// for a failure, which is written out as its own line. A tool that
+	/// went wrong is the thing a user scrolls back for, and it should
+	/// not be reachable only by opening a disclosure.
+	/// </summary>
+	private void ShowToolComplete(ToolExecutionCompleteData data)
+	{
+		var id = "tool:" + (data.ToolCallId ?? string.Empty);
+		ToolRecord? started;
+		lock (_sync)
+		{
+			if (!_toolCalls.Remove(id, out started))
+				return;
+		}
+
+		var outcome = ToolDetail.Outcome(data.Success, data.Error?.Message, data.Result?.Content);
+		var card = NoticeFormatter.Tool(started.Name, started.Headline, started.Body,
+			data.Success ? "ok" : "failed", outcome);
+		ReplaceRendered(id, card.Rendered);
+		if (!data.Success)
+			AddNotice("[tool] " + started.Name + " failed: " + ShortText.Clip(outcome, 200));
 	}
 
 	/// <summary>
