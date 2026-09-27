@@ -1,9 +1,11 @@
 # TurboPilot
 
-TurboPilot is a retro Windows desktop client for large-language-model coding sessions. It provides streamed chat through the GitHub Copilot SDK or an OpenAI-compatible provider, with a narrow layout designed to sit beside an editor. It answers the question: _"What if LLMs existed in 1992?"_
+TurboPilot is a retro Windows 11 desktop client for large-language-model coding sessions. It provides streamed chat through the GitHub Copilot SDK or any OpenAI-compatible provider, including locally hosted models. It's modern development with a cozy DOS feel.
 
-![sample](./sample.gif)
-###### (shown here in wide aspect for this demonstration)
+It answers the question: _"What if LLMs existed in 1992?"_
+
+![sample](./screenshot.png)
+
 
 ## Requirements
 
@@ -142,3 +144,6 @@ not affiliated with nor endorsed by any IDE vendor who made similar looking comm
 </a>
 
 <small>(The joy I get from a free latte is incredible)</small> 
+
+another output sample:
+![sample](./sample.gif)
