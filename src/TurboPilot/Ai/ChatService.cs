@@ -45,8 +45,6 @@ public sealed partial class ChatService : IAsyncDisposable
 	private WorkspaceFileIndex? _fileIndex;
 	private Task _formattingTail = Task.CompletedTask;
 	private ChatSessionOptions? _pendingChanges;
-	// Injected by checks so the update notice can be exercised offline.
-	internal Func<CancellationToken, Task<string?>>? _cliVersionLookup;
 	private IReadOnlyList<PlanStep> _plan = [];
 	private string? _planMessageId;
 	private Task _planTail = Task.CompletedTask;
@@ -688,9 +686,6 @@ public sealed partial class ChatService : IAsyncDisposable
 					case ToolExecutionCompleteEvent done:
 						ShowToolComplete(done.Data);
 						break;
-					case SessionStartEvent start when !_options.UseByok:
-						CheckCliVersion(start.Data.CopilotVersion);
-						break;
 					case SessionTodosChangedEvent:
 						RefreshPlan();
 						break;
@@ -959,24 +954,6 @@ public sealed partial class ChatService : IAsyncDisposable
 	/// sits beside the turn that made it.
 	/// </summary>
 	internal void ShowDiff(string path, string diff) => AddNotice(NoticeFormatter.Diff(path, diff));
-
-	/// <summary>
-	/// Looks up the latest Copilot CLI release off the event thread and	/// writes one line if the running CLI is behind. BYOK sessions never
-	/// reach here: they do not use the CLI, so its version is not their
-	/// problem. Failures are silent by design.
-	/// </summary>
-	private void CheckCliVersion(string? version) => _ = Task.Run(async () =>
-	{
-		try
-		{
-			if (await CliUpdate.CheckAsync(version, _cliVersionLookup, _lifetime.Token) is { } notice)
-				AddNotice(NoticeFormatter.Status("update", notice));
-		}
-		catch (Exception)
-		{
-			// An update notice is a courtesy; it never reports its own failure.
-		}
-	});
 
 	private void ReportServerStatus(string name, string status, string? error)
 	{

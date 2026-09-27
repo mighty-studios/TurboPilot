@@ -19,7 +19,6 @@ internal static class CoreChecks
 		CheckConfiguration();
 		CheckApplicationInstructions();
 		CheckExternalTools();
-		await CheckCliUpdateAsync();
 		CheckWorkspaceReadme();
 		CheckShortText();
 		CheckArchiveLine();
@@ -551,42 +550,6 @@ internal static class CoreChecks
 		var bare = workspace.Store.Create("snapshot-2", options, "");
 		Check.True(!MainWindow.RestoreSessionOptions(bare, new Settings()).Customizations.HasItems,
 			"A session saved without a snapshot must fall back to a fresh scan.");
-	}
-
-	/// <summary>
-	/// The Copilot CLI update notice. It has to be right about being
-	/// behind, because an update prompt for a current tool trains the
-	/// user to ignore it, and it has to stay quiet about everything it
-	/// cannot determine.
-	/// </summary>
-	private static async Task CheckCliUpdateAsync()
-	{
-		Check.True(CliUpdate.IsNewer("1.0.37", "1.0.41"), "A later patch is newer.");
-		Check.True(CliUpdate.IsNewer("v1.0.37", "v1.1.0"), "A later minor is newer.");
-		Check.True(CliUpdate.IsNewer("1.9.0", "2.0.0"), "A later major is newer.");
-		Check.True(!CliUpdate.IsNewer("1.0.41", "1.0.41"), "The same version is not newer.");
-		Check.True(!CliUpdate.IsNewer("1.0", "1.0.0"), "A missing part counts as zero.");
-		Check.True(!CliUpdate.IsNewer("1.0.41", "1.0.9"), "A lower patch is not newer, digit by digit.");
-		Check.True(!CliUpdate.IsNewer("1.0.41", "not-a-version"), "An unparseable tag must never claim to be newer.");
-		Check.True(!CliUpdate.IsNewer("", "1.0.41"), "An unknown current version must never claim to be behind.");
-
-		Check.Equal("Copilot CLI v1.0.37 -> v1.0.41 available. Open a Copilot terminal and run /update",
-			CliUpdate.Notice("1.0.37", "v1.0.41"), "Name both versions and how to update");
-		Check.True(CliUpdate.Notice("1.0.41", "1.0.41") is null, "Say nothing when the CLI is current.");
-
-		CliUpdate.ResetForTesting();
-		var lookups = 0;
-		Task<string?> Latest(CancellationToken _) { lookups++; return Task.FromResult<string?>("v1.0.41"); }
-		Check.True(await CliUpdate.CheckAsync("1.0.37", Latest) is not null, "Report a CLI that is behind.");
-		Check.True(await CliUpdate.CheckAsync("1.0.37", Latest) is null, "Check at most once per run.");
-		Check.Equal(1, lookups, "Ask GitHub once per run, not once per session");
-
-		CliUpdate.ResetForTesting();
-		Check.True(await CliUpdate.CheckAsync(null, Latest) is null, "Say nothing when the CLI reports no version.");
-		Check.Equal(1, lookups, "An unknown version must not cost a lookup");
-		CliUpdate.ResetForTesting();
-		Check.True(await CliUpdate.CheckAsync("1.0.37", _ => Task.FromResult<string?>(null)) is null,
-			"A failed lookup is silent, not an error.");
 	}
 
 	private static void CheckStorage()
