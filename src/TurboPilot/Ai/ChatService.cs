@@ -205,7 +205,7 @@ public sealed partial class ChatService : IAsyncDisposable
 				: await _client.ResumeSessionAsync(SessionId, (ResumeSessionConfig)config, token);
 			token.ThrowIfCancellationRequested();
 #pragma warning disable GHCP001
-			await _session.Rpc.Mode.SetAsync(SessionModeOf(_agentMode), token);
+			await _session.Rpc.Mode.SetAsync(SessionModeOf(_agentMode), cancellationToken: token);
 #pragma warning restore GHCP001
 
 			lock (_sync)
@@ -1182,7 +1182,7 @@ public sealed partial class ChatService : IAsyncDisposable
 #pragma warning disable GHCP001
 		if (next.Model != _options.Model)
 		{
-			var switched = await session.Rpc.Model.SwitchToAsync(next.Model, effort, cancellationToken: cancellationToken).ConfigureAwait(false);
+			var switched = await session.Rpc.Model.SwitchToAsync(next.Model, reasoningEffort: effort, cancellationToken: cancellationToken).ConfigureAwait(false);
 			if (switched.Deferred == true)
 			{
 				lock (_sync) _pendingChanges = next;
@@ -1193,7 +1193,7 @@ public sealed partial class ChatService : IAsyncDisposable
 			await session.Rpc.Model.SetReasoningEffortAsync(effort, cancellationToken).ConfigureAwait(false);
 		var mode = AgentModeOf(next.Mode);
 		if (next.Mode != _options.Mode)
-			await session.Rpc.Mode.SetAsync(SessionModeOf(mode), cancellationToken).ConfigureAwait(false);
+			await session.Rpc.Mode.SetAsync(SessionModeOf(mode), cancellationToken: cancellationToken).ConfigureAwait(false);
 #pragma warning restore GHCP001
 		lock (_sync)
 		{
