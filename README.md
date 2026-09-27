@@ -1,6 +1,9 @@
 # TurboPilot
 
-TurboPilot is a retro Windows desktop client for language-model coding sessions. It provides streamed chat through the GitHub Copilot SDK or an OpenAI-compatible provider, with a narrow layout designed to sit beside an editor.
+TurboPilot is a retro Windows desktop client for large-language-model coding sessions. It provides streamed chat through the GitHub Copilot SDK or an OpenAI-compatible provider, with a narrow layout designed to sit beside an editor. It answers the question: _"What if LLMs existed in 1992?"_
+
+![sample](./sample.gif)
+###### (shown here in wide aspect for this demonstration)
 
 ## Requirements
 
@@ -95,3 +98,47 @@ dotnet run --project .\tests\TurboPilot.Tests -- --runtime --ui
 - `--session-features` checks links, workspace changes, and session hand-offs.
 - `--ui-close` checks exit confirmation and cleanup.
 - `--cloud` performs an optional authenticated cloud smoke test and may consume credits.
+
+## Related Projects
+
+TurboPilot was created using the [TurbolandWPF theme](https://github.com/mighty-studios/TurbolandWPF) and the [Github Copilot SDK](https://github.com/github/copilot-sdk)
+
+## Licensing
+
+### Source code
+
+Copyright 2026 Mighty Studios, LLC.  
+All rights reserved.
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at
+
+   http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
+
+See [LICENSE.md](LICENSE.md)
+
+### Third-party font notice
+
+This repository bundles the font **Px437 IBM VGA 9x16** by VileR.  
+From [The Ultimate Oldschool PC Font Pack](https://int10h.org/oldschool-pc-fonts/),
+used under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+
+The font is licensed separately under **CC BY-SA 4.0** and is not
+covered by the Apache 2.0 license applied to this project's source code.
+
+__Projects made using this Theme and the bundled Px437 IBM VGA 9x16 font should also credit VileR according to the CC BY-SA 4.0 terms__
+
+## Artistic Dislaimer
+This project is an independent, artistic tribute to the look of 1990s DOS text-mode IDEs. It is
+not affiliated with nor endorsed by any IDE vendor who made similar looking commercial projects.
+
+---  
+  
+>If you enjoy this project, please consider:
+
+<a href="https://www.buymeacoffee.com/mighty_studios" target="_blank">
+  <img src="https://cdn.buymeacoffee.com/buttons/default-yellow.png" alt="Buy Me A Coffee" height="41" width="174">
+</a>
+
+<small>(The joy I get from a free latte is incredible)</small> 

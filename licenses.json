@@ -1,0 +1,40 @@
+{
+  "licenseExpression": "Apache-2.0",
+  "project": {
+    "name": "TurboPilot",
+    "copyright": "Copyright 2026 Mighty Studios, LLC",
+    "license": {
+      "spdx": "Apache-2.0",
+      "name": "Apache License 2.0",
+      "file": "LICENSE.md",
+      "scope": "All source code and original project assets unless otherwise noted."
+    }
+  },
+  "thirdPartyComponents": [
+    {
+      "name": "Px437 IBM VGA 9x16",
+      "author": "VileR",
+      "source": "https://int10h.org/oldschool-pc-fonts/",
+      "license": {
+        "spdx": "CC-BY-SA-4.0",
+        "name": "Creative Commons Attribution-ShareAlike 4.0 International",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/"
+      },
+      "bundled": true,
+      "modified": false,
+      "scope": "Bundled font asset",
+      "notes": [
+        "This font is licensed separately from the project source code.",
+        "The font is not covered by the Apache-2.0 license.",
+        "Projects redistributing the bundled font should comply with the attribution and other requirements of CC BY-SA 4.0."
+      ]
+    }
+  ],
+  "summary": {
+    "sourceCodeLicense": "Apache-2.0",
+    "containsThirdPartyLicenses": true,
+    "thirdPartyLicenseIds": [
+      "CC-BY-SA-4.0"
+    ]
+  }
+}
