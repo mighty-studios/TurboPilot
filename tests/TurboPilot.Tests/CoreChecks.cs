@@ -410,6 +410,16 @@ internal static class CoreChecks
 		Check.Equal("", ShortText.Workspace(null), "No workspace yields nothing to show");
 		Check.Equal(24, ShortText.Workspace(new string('w', 90)).Length, "A long folder name is clipped like the rest");
 
+		Check.Equal(@"D:\dev\projects\TurboPilot", ShortText.WorkspacePath(@"D:\dev\projects\TurboPilot"),
+			"A workspace path within budget is shown whole");
+		var longPath = @"D:\" + new string('d', 80) + @"\project";
+		Check.Equal(48, ShortText.WorkspacePath(longPath, 48).Length, "A long path never exceeds its budget");
+		Check.True(ShortText.WorkspacePath(longPath, 48).StartsWith("...", StringComparison.Ordinal),
+			"A path is cut from the front so its tail stays visible");
+		Check.True(ShortText.WorkspacePath(longPath, 48).EndsWith(@"\project", StringComparison.Ordinal),
+			"The distinguishing tail of a path survives the cut");
+		Check.Equal("", ShortText.WorkspacePath(null), "No workspace path yields nothing to show");
+
 		var record = new SessionRecord
 		{
 			SessionId = "workspace-" + new string('9', 60),

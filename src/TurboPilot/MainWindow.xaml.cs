@@ -60,8 +60,9 @@ public partial class MainWindow : TurbolandWindow
 	private bool _closeRequested;
 	private bool _closeApproved;
 
-	// Model id and session id of the live session, shown in the
-	// sessionInfo badge. Both null while no session is running.
+	// Model and session id of the live session. The badge shows the model
+	// over the workspace folder; the id identifies the session elsewhere.
+	// Both null while no session is running.
 	private string? _sessionModel;
 	private string? _sessionId;
 
@@ -189,22 +190,23 @@ public partial class MainWindow : TurbolandWindow
 	}
 
 	/// <summary>
-	/// Repaints the session badge: the model in use and the session id
+	/// Repaints the session badge: the model over the workspace folder
 	/// while a live session exists, otherwise a notice that none is
-	/// active. Both are written for machines and run long, so the badge
-	/// shows shortened forms and keeps the full pair in its tooltip.
+	/// active. Both can run long, so the badge shows shortened forms and
+	/// keeps the full values in its tooltip.
 	/// </summary>
 	private void UpdateSessionInfo()
 	{
 		if (_chat is not null && _sessionId is not null)
 		{
-			var model = ShortText.Model(_sessionModel);
+			var model = ShortText.Model(_sessionModel, 48);
+			var workspace = ShortText.WorkspacePath(_chat.Options.WorkspaceFolder);
 			sessionInfo.Text = model.Length == 0
-				? ShortText.SessionId(_sessionId)
-				: $"{model} | {ShortText.SessionId(_sessionId)}";
-			sessionInfo.ToolTip = string.IsNullOrEmpty(_sessionModel)
-				? _sessionId
-				: $"{_sessionModel}\r\n{_sessionId}";
+				? workspace
+				: $"{model}\r\n{workspace}";
+			var full = string.Join("\r\n", new[] { _sessionModel, _chat.Options.WorkspaceFolder }
+				.Where(value => !string.IsNullOrWhiteSpace(value)));
+			sessionInfo.ToolTip = full.Length == 0 ? null : full;
 		}
 		else
 		{

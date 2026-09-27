@@ -67,4 +67,18 @@ internal static class ShortText
 		var leaf = slash >= 0 ? trimmed[(slash + 1)..] : trimmed;
 		return Clip(leaf.Length == 0 ? trimmed : leaf, max);
 	}
+
+	/// <summary>
+	/// A workspace path shown whole when it fits and cut from the front
+	/// otherwise. The tail of a path - a project's own folders - is what
+	/// tells one workspace from another, so the head is dropped and
+	/// marked with a leading ellipsis when the path runs past its budget.
+	/// </summary>
+	internal static string WorkspacePath(string? path, int max = 48)
+	{
+		var text = (path ?? "").Trim();
+		if (max <= 0) return "";
+		if (text.Length <= max) return text;
+		return max <= Ellipsis.Length ? text[^max..] : Ellipsis + text[^(max - Ellipsis.Length)..];
+	}
 }
