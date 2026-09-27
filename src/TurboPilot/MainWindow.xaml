@@ -86,6 +86,8 @@
                 <MenuItem x:Name="menuOpenVsCode" Header="Open _VSCode" Click="OnOpenVsCode"/>
             </MenuItem>
             <MenuItem Header="_Help">
+                <MenuItem x:Name="menuShowHelp" Header="Show _Help" Click="OnShowHelp"/>
+                <Separator/>
                 <MenuItem Header="_About..." Click="OnAbout"/>
             </MenuItem>
         </Menu>

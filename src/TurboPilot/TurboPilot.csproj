@@ -9,6 +9,7 @@
 		<UseWindowsForms>true</UseWindowsForms>
 		<RootNamespace>TurboPilot</RootNamespace>
 		<ApplicationManifest>app.manifest</ApplicationManifest>
+		<Version>1.0.0-alpha.1</Version>
 	</PropertyGroup>
 
 	<PropertyGroup>

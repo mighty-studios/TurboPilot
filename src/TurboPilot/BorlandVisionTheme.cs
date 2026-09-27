@@ -68,8 +68,8 @@ public static class BorlandVisionTheme
 		public const string LightCyan = "#55FFFF";    // 11
 		public const string LightRed = "#FF5555";     // 12
 		public const string Pink = "#FF55FF";         // 13
-		public const string Yellow = "#FFFF55";       // 14
-		public const string White = "#FFFFFF";        // 15
+		public const string Yellow = "#F0F055";       // 14
+		public const string White = "#F0F0F0";        // 15
 
 		/// <summary>
 		/// The one non-hardware entry: a shaded desktop blue used for zebra
@@ -154,37 +154,37 @@ public static class BorlandVisionTheme
 
 		// Headings
 		new("#output h1", "Heading 1: the title of a response",
-			Palette.Yellow, "", 1.1, Bold: false),
+			Palette.Yellow, "", 1.2, Bold: false),
 		new("#output h2", "Heading 2",
-			Palette.White, "", 1.1, Bold: false),
+			Palette.White, "", 1.2, Bold: false),
 		new("#output h3", "Heading 3",
-			Palette.LightCyan, "", 1.05, Bold: false),
+			Palette.LightCyan, "", 1.01, Bold: false),
 		new("#output h4", "Heading 4",
-			Palette.LightGreen, "", 1.05, Bold: false),
+			Palette.LightGreen, "", 1.01, Bold: false),
 		new("#output h5", "Heading 5",
-			Palette.Pink, "", 1.05, Bold: false),
+			Palette.Pink, "", 1.01, Bold: false),
 		new("#output h6", "Heading 6: the quietest rung, still legible on blue",
-			Palette.LightGray, "", 1.05, Bold: false),
+			Palette.LightGray, "", 1.01, Bold: false),
 
 		// Emphasis
 		new("#output strong", "Bold",
-			Palette.White, "", 1.0, Bold: true),
+			Palette.White, "", 1.01, Bold: true),
 		new("#output em", "Italic: pink is the emphasis color of the help screens",
-			Palette.Pink, "", 1.0, Italic: true),
+			Palette.Pink, "", 1.01, Italic: true),
 		new("#output del", "Struck through",
-			Palette.LightRed, "", 1.0, Decoration: "line-through"),
+			Palette.LightRed, "", 1.01, Decoration: "line-through"),
 		new("#output mark", "Marked text: reverse video, no new hue needed",
 			Semantic.SelectionForeground, Semantic.Accent),
 
 		// Links
 		new("#output a", "Hyperlink",
-			Palette.LightCyan, "", 1.0, Decoration: "underline"),
+			Palette.LightCyan, "", 1.01, Decoration: "underline"),
 		// Visited must precede hover, or it wins the tie and a hovered link
 		// never lights up.
 		new("#output a:visited", "Already opened: dimmed rather than purple",
 			Palette.LightGray),
 		new("#output a:hover", "Hyperlink under the pointer: full reverse video",
-			Palette.Blue, Palette.Yellow, 1.0, Decoration: "underline"),
+			Palette.Blue, Palette.Yellow, 1.01, Decoration: "underline"),
 		new("#output a[href^=\"kp-path:\" i], #output a[href^=\"kp-path%3A\" i]",
 			"File-path link: green, the way the editor drew a filename",
 			Palette.LightGreen, "", 1.0, Decoration: "underline"),

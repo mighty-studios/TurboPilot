@@ -35,12 +35,9 @@ public partial class AboutDialog : TurbolandFloatingDialog
 
 	private static string BuildMessage()
 	{
-		Version version = Assembly.GetExecutingAssembly().GetName().Version
-			?? new Version(1, 0, 0);
-
 		return string.Join(Environment.NewLine,
 			"TURBO-PILOT",
-			$"Version {version.Major}.{version.Minor}.{version.Build}",
+			$"Version {ProductVersion()}",
 			"",
 			"An open-source retro interface for working with LLM models.",
 			"",
@@ -53,5 +50,28 @@ public partial class AboutDialog : TurbolandFloatingDialog
 			"https://github.com/mighty-studios/TurboPilot",
 			""
 			);
+	}
+
+	/// <summary>
+	/// The assembly's InformationalVersion (which carries any pre-release
+	/// label such as "-alpha.1"), with the SemVer build-metadata suffix
+	/// after "+" removed. Falls back to the numeric assembly version when the
+	/// attribute is absent.
+	/// </summary>
+	private static string ProductVersion()
+	{
+		Assembly assembly = Assembly.GetExecutingAssembly();
+
+		string? informational = assembly
+			.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+			.InformationalVersion;
+
+		if (!string.IsNullOrWhiteSpace(informational))
+		{
+			int plus = informational.IndexOf('+');
+			return plus >= 0 ? informational[..plus] : informational;
+		}
+
+		return assembly.GetName().Version?.ToString() ?? "1.0.0";
 	}
 }

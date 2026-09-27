@@ -109,7 +109,7 @@ public partial class MainWindow : TurbolandWindow
 
 		// Seed the transcript through the shared API so Raw and Rendered
 		// start in sync.
-		AppendOutput(LoadSampleTranscript());
+		AppendOutput(LoadHelpDocument());
 
 		// Appending leaves the caret at the end, which is where the view
 		// scrolls when it is first realized. The opening sample is read from
@@ -557,14 +557,14 @@ public partial class MainWindow : TurbolandWindow
 	public string RenderedText => _renderedText.ToString();
 
 	/// <summary>
-	/// The sample document both output views open with. It ships as markdown
-	/// text rather than markup because the Raw tab has to show exactly what
-	/// the Rendered tab renders. Line endings are normalized to CRLF so the
-	/// buffer, the Raw tab and the file agree.
+	/// The help document shown at startup and on demand from the Help menu.
+	/// It ships as markdown text rather than markup because the Raw tab has
+	/// to show exactly what the Rendered tab renders. Line endings are
+	/// normalized to CRLF so the buffer, the Raw tab and the file agree.
 	/// </summary>
-	private static string LoadSampleTranscript()
+	private static string LoadHelpDocument()
 	{
-		var path = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "SampleTranscript.md");
+		var path = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "ShowHelp.md");
 		try
 		{
 			var text = System.IO.File.ReadAllText(path);
@@ -572,7 +572,7 @@ public partial class MainWindow : TurbolandWindow
 		}
 		catch
 		{
-			// Missing or unreadable sample is not worth a dialog.
+			// Missing or unreadable help document is not worth a dialog.
 			return "TurboPilot\r\n";
 		}
 	}
@@ -665,6 +665,20 @@ public partial class MainWindow : TurbolandWindow
 	{
 		if (string.IsNullOrEmpty(s)) return "''";
 		return "'" + s.Replace("\\", "\\\\").Replace("'", "\\'").Replace("\r", "\\r").Replace("\n", "\\n").Replace("\t", "\\t") + "'";
+	}
+
+	/// <summary>
+	/// Help menu: appends the help document to the output without clearing
+	/// it, so it can be read over an active session's transcript. A blank
+	/// line separates it from whatever came before.
+	/// </summary>
+	private void OnShowHelp(object sender, RoutedEventArgs e)
+	{
+		var help = LoadHelpDocument();
+		if (_outputText.Length > 0)
+			help = "\r\n" + help;
+
+		AppendOutput(help);
 	}
 
 	private void OnAbout(object sender, RoutedEventArgs e)
