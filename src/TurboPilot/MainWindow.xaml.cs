@@ -1501,8 +1501,7 @@ public partial class MainWindow : TurbolandWindow
 				ShowFileDiff(chat, anchor, path);
 				break;
 			case "tool":
-				if (!WorkspaceChanges.OpenDiffTool(anchor, path))
-					chat.AddNotice(NoticeFormatter.Status("diff", "No diff tool is configured for this workspace."));
+				CompareFile(chat, anchor, path);
 				break;
 			case "revert":
 				RevertFile(chat, anchor, path);
@@ -1517,7 +1516,7 @@ public partial class MainWindow : TurbolandWindow
 	private void ShowFileDiff(ChatService chat, ChangeAnchor? anchor, string path)
 	{
 		if (anchor is null) return;
-		if (!anchor.HasDiffs)
+		if (!anchor.CanDiff(path))
 		{
 			HandleWebMessage("openPath", WorkspaceChanges.FullPath(anchor, path));
 			return;
@@ -1526,16 +1525,38 @@ public partial class MainWindow : TurbolandWindow
 	}
 
 	/// <summary>
+	/// Hands one file to the user's own diff tool, through the history
+	/// of the repository holding it. With no earlier copy the tool would
+	/// open on nothing, so the reason is given instead.
+	/// </summary>
+	private static void CompareFile(ChatService chat, ChangeAnchor? anchor, string path)
+	{
+		if (NoEarlierCopy(anchor, path, "compare it with") is { } reason)
+			chat.AddNotice(NoticeFormatter.Status("diff", reason));
+		else if (!WorkspaceChanges.OpenDiffTool(anchor, path))
+			chat.AddNotice(NoticeFormatter.Status("diff", "Git could not be started to compare " + path + "."));
+	}
+
+	/// <summary>
+	/// Why there is no earlier copy of a file to act on, or null when
+	/// there is one. A file in no repository never has one, and nothing
+	/// is held at all until a turn has begun in this session.
+	/// </summary>
+	private static string? NoEarlierCopy(ChangeAnchor? anchor, string path, string purpose) =>
+		anchor is null ? "This session holds no earlier copy of " + path + ", so there is nothing to " + purpose + "."
+		: anchor.CanDiff(path) ? null
+		: path + " is not in a Git repository, so there is no earlier copy to " + purpose + ".";
+
+	/// <summary>
 	/// Puts one file back as it was. Discarding work is the one action
 	/// in the card that cannot be undone, so it asks first and names
 	/// the file it is about to overwrite.
 	/// </summary>
 	private void RevertFile(ChatService chat, ChangeAnchor? anchor, string path)
 	{
-		if (anchor is null || !anchor.HasDiffs)
+		if (NoEarlierCopy(anchor, path, "put back") is { } reason)
 		{
-			chat.AddNotice(NoticeFormatter.Status("revert",
-				"Reverting needs a Git workspace, so this file cannot be put back."));
+			chat.AddNotice(NoticeFormatter.Status("revert", reason));
 			return;
 		}
 		if (MessageBox.Show(this, "Discard the changes to this file and put it back as it was?\r\n\r\n" + path,

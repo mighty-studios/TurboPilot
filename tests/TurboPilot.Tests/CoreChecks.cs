@@ -61,7 +61,8 @@ internal static class CoreChecks
 		// and its later edit must be reported against that dirty state.
 		File.WriteAllText(Path.Combine(root, "kept.txt"), "one\ntwo\n");
 		var anchor = WorkspaceChanges.Begin(root);
-		Check.True(anchor is { HasDiffs: true }, "A repository workspace must anchor against a commit.");
+		Check.True(anchor is { Repositories.Count: 1, Stamps: null } && anchor.CanDiff("edited.txt"),
+			"A repository workspace must anchor against a commit.");
 
 		File.WriteAllText(Path.Combine(root, "edited.txt"), "after\n");
 		File.WriteAllText(Path.Combine(root, "created.txt"), "new\n");
@@ -90,7 +91,8 @@ internal static class CoreChecks
 		using var plain = new TestWorkspace();
 		plain.Write("workspace\\a.txt", "a");
 		var loose = WorkspaceChanges.Begin(plain.Workspace);
-		Check.True(loose is { HasDiffs: false }, "A workspace without Git anchors on file stamps instead.");
+		Check.True(loose is { Repositories.Count: 0, Stamps: not null } && !loose.CanDiff("b.txt"),
+			"A workspace without Git anchors on file stamps instead.");
 		File.WriteAllText(Path.Combine(plain.Workspace, "b.txt"), "b");
 		Check.True(WorkspaceChanges.Since(loose).Any(change => change.Path == "b.txt" && change.Kind == "added"),
 			"A workspace without Git still reports which files changed.");
@@ -98,10 +100,125 @@ internal static class CoreChecks
 			"A workspace without Git offers no diff rather than a wrong one");
 		Check.True(!WorkspaceChanges.Revert(loose, "b.txt"), "Nothing can be put back without an earlier copy.");
 
+		// A workspace is often the folder above a checkout rather than
+		// the checkout itself. A file inside the checkout still has its
+		// history, and is diffed, compared and put back through it. A
+		// file beside the checkout, or in a repository with no commit
+		// yet, has none and is only reported.
+		using var holder = new TestWorkspace();
+		var checkout = Path.Combine(holder.Workspace, "checkout");
+		var unborn = Path.Combine(holder.Workspace, "unborn");
+		Directory.CreateDirectory(checkout);
+		Directory.CreateDirectory(unborn);
+		Git(checkout, "init -q -b main");
+		Git(checkout, "config user.email fixture@example.invalid");
+		Git(checkout, "config user.name Fixture");
+		Git(unborn, "init -q -b main");
+		holder.Write("workspace\\checkout\\tracked.txt", "old\n");
+		holder.Write("workspace\\unborn\\draft.txt", "draft\n");
+		holder.Write("workspace\\notes.txt", "loose\n");
+		Git(checkout, "add -A");
+		Git(checkout, "commit -q -m fixture");
+
+		var outer = WorkspaceChanges.Begin(holder.Workspace);
+		Check.True(outer is { Repositories.Count: 1, Stamps: not null } && outer.CanDiff("checkout/tracked.txt")
+			&& !outer.CanDiff("notes.txt") && !outer.CanDiff("unborn/draft.txt"),
+			"Only a repository with a commit is anchored, and only its files have an earlier copy.");
+
+		File.WriteAllText(Path.Combine(checkout, "tracked.txt"), "new\n");
+		File.WriteAllText(Path.Combine(checkout, "fresh.txt"), "fresh\n");
+		File.WriteAllText(Path.Combine(unborn, "draft.txt"), "draft, edited\n");
+		File.WriteAllText(Path.Combine(holder.Workspace, "notes.txt"), "loose, edited\n");
+		var nestedChanges = WorkspaceChanges.Since(outer);
+		Check.Equal(4, nestedChanges.Count,
+			"Each change is reported once: " + string.Join(", ", nestedChanges.Select(change => change.Path)));
+		var nested = nestedChanges.ToDictionary(change => change.Path, change => change.Kind);
+		Check.Equal("modified", nested.GetValueOrDefault("checkout/tracked.txt"), "Report an edit inside a checkout");
+		Check.Equal("added", nested.GetValueOrDefault("checkout/fresh.txt"), "Report a file created inside a checkout");
+		Check.Equal("modified", nested.GetValueOrDefault("notes.txt"), "Report an edit beside a checkout");
+		Check.Equal("modified", nested.GetValueOrDefault("unborn/draft.txt"), "Report an edit in a repository with no commit");
+
+		var nestedDiff = WorkspaceChanges.Diff(outer, "checkout/tracked.txt");
+		Check.True(nestedDiff.Contains("-old") && nestedDiff.Contains("+new"),
+			"A file in a checkout is diffed against that checkout's history: " + nestedDiff);
+		Check.True(WorkspaceChanges.Diff(outer, "checkout/fresh.txt").Contains("+fresh"),
+			"A file created in a checkout is shown whole.");
+		Check.Equal(string.Empty, WorkspaceChanges.Diff(outer, "notes.txt"),
+			"A file beside a checkout offers no diff rather than a wrong one");
+
+		// The file is handed over by the checkout's own git, so the
+		// earlier copy comes from that checkout's history.
+		var compare = WorkspaceChanges.DiffToolCommand(outer, "checkout/tracked.txt");
+		Check.True(compare is not null && WorkspaceChanges.DiffToolCommand(outer, "notes.txt") is null,
+			"Only a file with an earlier copy can be handed to a diff tool.");
+		Check.Equal("old\nnew\n", ToolSees(compare!).Replace("\r\n", "\n"),
+			"The diff tool must get the earlier copy first and the file as it is now second");
+
+		Check.True(WorkspaceChanges.Revert(outer, "checkout/tracked.txt"), "Reverting a file in a checkout must succeed.");
+		Check.Equal("old\n", File.ReadAllText(Path.Combine(checkout, "tracked.txt")).Replace("\r\n", "\n"),
+			"Reverting puts a file in a checkout back from that checkout's history");
+		Check.True(!WorkspaceChanges.Revert(outer, "notes.txt"), "A file beside a checkout has no earlier copy to put back.");
+
+		// A workspace can also be a folder inside a checkout. Git names a
+		// change from the top of the checkout unless told otherwise, but
+		// reads a path it is handed from where it runs, so a change has
+		// to be named from the workspace, and one above it left out.
+		using var enclosing = new TestWorkspace();
+		Git(enclosing.Root, "init -q -b main");
+		Git(enclosing.Root, "config user.email fixture@example.invalid");
+		Git(enclosing.Root, "config user.name Fixture");
+		enclosing.Write("workspace\\mine.txt", "old\n");
+		enclosing.Write("above.txt", "above\n");
+		Git(enclosing.Root, "add -A");
+		Git(enclosing.Root, "commit -q -m fixture");
+
+		var enclosed = WorkspaceChanges.Begin(enclosing.Workspace);
+		File.WriteAllText(Path.Combine(enclosing.Workspace, "mine.txt"), "new\n");
+		File.WriteAllText(Path.Combine(enclosing.Workspace, "made.txt"), "made\n");
+		File.WriteAllText(Path.Combine(enclosing.Root, "above.txt"), "above, edited\n");
+		Check.Equal("added made.txt, modified mine.txt",
+			string.Join(", ", WorkspaceChanges.Since(enclosed).Select(change => change.Kind + " " + change.Path).Order()),
+			"A workspace inside a checkout lists its own changes, named from the workspace");
+		var enclosedDiff = WorkspaceChanges.Diff(enclosed, "mine.txt");
+		Check.True(enclosedDiff.Contains("-old") && enclosedDiff.Contains("+new"),
+			"A file in a workspace inside a checkout is diffed by its listed name: " + enclosedDiff);
+		Check.Equal("old\nnew\n", ToolSees(WorkspaceChanges.DiffToolCommand(enclosed, "mine.txt")!).Replace("\r\n", "\n"),
+			"A file in a workspace inside a checkout is compared by its listed name");
+		Check.True(WorkspaceChanges.Revert(enclosed, "mine.txt"), "Reverting a file in a workspace inside a checkout must succeed.");
+		Check.Equal("old\n", File.ReadAllText(Path.Combine(enclosing.Workspace, "mine.txt")).Replace("\r\n", "\n"),
+			"Reverting puts a file in a workspace inside a checkout back as it was");
+
 		Check.Equal(0, WorkspaceChanges.Since(null).Count, "No anchor means nothing to report");
 		Check.True(WorkspaceChanges.Begin(Path.Combine(workspace.Root, "absent")) is null,
 			"A workspace that is not there cannot be watched.");
-		Console.WriteLine("PASS workspace changes anchored per turn, diffed, and reverted");
+		Console.WriteLine("PASS workspace changes anchored per turn and per repository in the workspace, diffed, compared, and reverted");
+
+		// Runs a diff tool command with a stand-in tool that prints the
+		// two files it was given. Settings passed in the environment
+		// outrank every config file, so the user's own tool never opens.
+		static string ToolSees(System.Diagnostics.ProcessStartInfo command)
+		{
+			var start = new System.Diagnostics.ProcessStartInfo
+			{
+				FileName = command.FileName,
+				Arguments = command.Arguments,
+				WorkingDirectory = command.WorkingDirectory,
+				RedirectStandardOutput = true,
+				RedirectStandardError = true,
+				UseShellExecute = false,
+				CreateNoWindow = true,
+			};
+			start.Environment["GIT_CONFIG_COUNT"] = "2";
+			start.Environment["GIT_CONFIG_KEY_0"] = "diff.tool";
+			start.Environment["GIT_CONFIG_VALUE_0"] = "probe";
+			start.Environment["GIT_CONFIG_KEY_1"] = "difftool.probe.cmd";
+			start.Environment["GIT_CONFIG_VALUE_1"] = "cat \"$LOCAL\" \"$REMOTE\"";
+			using var process = System.Diagnostics.Process.Start(start)!;
+			var output = process.StandardOutput.ReadToEnd();
+			process.StandardError.ReadToEnd();
+			process.WaitForExit(20_000);
+			return output;
+		}
 
 		static string? Git(string workspace, string arguments)
 		{

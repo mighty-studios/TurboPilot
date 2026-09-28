@@ -48,8 +48,8 @@ public partial class SessionChangesDialog : TurbolandFloatingDialog
 			1 => "1 file changed this session",
 			_ => changes.Count + " files changed this session",
 		};
-		// Outside a repository there is no earlier copy to compare
-		// against or restore from, so the list is all that can be
+		// A file in no repository has no earlier copy to compare against
+		// or restore from, so for that file the list is all that can be
 		// offered honestly.
 		buttonCompare.IsEnabled = buttonRevert.IsEnabled = false;
 		OnSelectionChanged(this, null!);
@@ -59,9 +59,8 @@ public partial class SessionChangesDialog : TurbolandFloatingDialog
 
 	private void OnSelectionChanged(object sender, SelectionChangedEventArgs e)
 	{
-		var has = Selected is not null;
-		buttonView.IsEnabled = has;
-		buttonCompare.IsEnabled = buttonRevert.IsEnabled = has && _anchor.HasDiffs;
+		buttonView.IsEnabled = Selected is not null;
+		buttonCompare.IsEnabled = buttonRevert.IsEnabled = Selected is { } row && _anchor.CanDiff(row.Change.Path);
 	}
 
 	private void OnView(object sender, RoutedEventArgs e)
@@ -76,7 +75,7 @@ public partial class SessionChangesDialog : TurbolandFloatingDialog
 	{
 		if (Selected is not { } row) return;
 		if (!WorkspaceChanges.OpenDiffTool(_anchor, row.Change.Path))
-			MessageBox.Show(this, "No diff tool is configured for this workspace.",
+			MessageBox.Show(this, "Git could not be started to compare that file.",
 				"Session Changes", MessageBoxButton.OK, MessageBoxImage.Information);
 	}
 

@@ -617,13 +617,32 @@ internal static class UiChecks
 		Check.Equal(before, chat.Transcript.Length, "An unknown action must do nothing at all");
 		Check.Equal(windows, application.Windows.Count, "An unknown action must not open a window");
 
-		// The runtime workspace is not a repository, so there is no
-		// earlier copy to compare against or restore from, and both
-		// actions have to say so rather than pretend.
+		// No turn has begun, so the session holds no earlier copy of
+		// anything, and both actions have to say so rather than pretend.
+		Invoke(window, "HandleChangeAction", "tool|a.txt");
 		Invoke(window, "HandleChangeAction", "revert|a.txt");
-		Check.True(chat.Transcript.Contains("Reverting needs a Git workspace"),
-			"Reverting without an earlier copy must explain itself: " + chat.Transcript);
-		Check.Equal(windows, application.Windows.Count, "Refusing to revert must not open a window");
+		Check.True(chat.Transcript.Contains("no earlier copy of a.txt, so there is nothing to compare it with")
+			&& chat.Transcript.Contains("no earlier copy of a.txt, so there is nothing to put back"),
+			"Comparing or reverting before any turn must explain itself: " + chat.Transcript);
+
+		// Once a turn has begun, the runtime workspace, which is not a
+		// repository, is watched by stamp alone, so a file in it still
+		// has no earlier copy, and the reason given has to be that one.
+		var workspace = Field<ChatSessionOptions>(chat, "_options").WorkspaceFolder!;
+		SetField(chat, "_turnAnchor", new ChangeAnchor(workspace, [], new Dictionary<string, long>()));
+		try
+		{
+			Invoke(window, "HandleChangeAction", "tool|a.txt");
+			Invoke(window, "HandleChangeAction", "revert|a.txt");
+			Check.True(chat.Transcript.Contains("a.txt is not in a Git repository, so there is no earlier copy to compare it with")
+				&& chat.Transcript.Contains("a.txt is not in a Git repository, so there is no earlier copy to put back"),
+				"Comparing or reverting a file in no repository must explain itself: " + chat.Transcript);
+		}
+		finally
+		{
+			SetField(chat, "_turnAnchor", null!);
+		}
+		Check.Equal(windows, application.Windows.Count, "Refusing to compare or revert must not open a window");
 		Console.WriteLine("PASS change card actions refusing what they cannot do");
 	}
 
@@ -729,7 +748,8 @@ internal static class UiChecks
 		WorkspaceChanges.Runner = (_, arguments) => arguments.StartsWith("diff --name-status")
 			? "M\tsrc\\one.cs\nA\tsrc\\two.cs\n"
 			: "";
-		var dialog = new SessionChangesDialog(new ChangeAnchor(@"D:\dev\p", "HEAD", new HashSet<string>(), null))
+		var dialog = new SessionChangesDialog(new ChangeAnchor(@"D:\dev\p",
+			[new RepositoryAnchor(@"D:\dev\p", "", "HEAD", new HashSet<string>())], null))
 		{
 			Owner = window,
 		};
@@ -738,6 +758,48 @@ internal static class UiChecks
 			TurbolandTheme.Wpf.TurbolandTheme.ApplyTo(dialog);
 			dialog.Show();
 			CheckRowSelectionIsVisible(Control<ListBox>(dialog, "listChanges"), "The session changes list");
+		}
+		finally
+		{
+			dialog.Close();
+			WorkspaceChanges.Runner = previous;
+		}
+	}
+
+	/// <summary>
+	/// Compare and Undo follow the selected file, not the workspace. A
+	/// workspace holding a checkout has both kinds of file: one inside
+	/// the checkout has an earlier copy to offer, and one beside it has
+	/// none.
+	/// </summary>
+	private static void CheckChangesActionsFollowTheFile(MainWindow window)
+	{
+		var previous = WorkspaceChanges.Runner;
+		WorkspaceChanges.Runner = (_, arguments) => arguments.StartsWith("diff --name-status") ? "M\tone.cs\n" : "";
+		// A folder that is not there, so the walk for loose files finds
+		// nothing and the one stamped file reads as removed.
+		var workspace = Path.Combine(Path.GetTempPath(), "TurboPilot.Tests", "absent-" + Guid.NewGuid().ToString("N"));
+		var anchor = new ChangeAnchor(workspace,
+			[new RepositoryAnchor(Path.Combine(workspace, "checkout"), "checkout/", "HEAD", new HashSet<string>())],
+			new Dictionary<string, long> { ["notes.txt"] = 1 });
+		var dialog = new SessionChangesDialog(anchor) { Owner = window };
+		try
+		{
+			TurbolandTheme.Wpf.TurbolandTheme.ApplyTo(dialog);
+			dialog.Show();
+			var list = Control<ListBox>(dialog, "listChanges");
+			var compare = Control<Button>(dialog, "buttonCompare");
+			var revert = Control<Button>(dialog, "buttonRevert");
+			Check.Equal(2, list.Items.Count, "The list must hold the file beside the checkout and the one in it");
+
+			object RowFor(string path) => list.Items.Cast<object>()
+				.First(item => item.GetType().GetProperty("Label")?.GetValue(item) is string label && label.EndsWith(" " + path));
+			list.SelectedItem = RowFor("notes.txt");
+			Check.True(!compare.IsEnabled && !revert.IsEnabled,
+				"A file in no repository has no earlier copy to compare with or put back.");
+			list.SelectedItem = RowFor("checkout/one.cs");
+			Check.True(compare.IsEnabled && revert.IsEnabled,
+				"A file inside a checkout can be compared with its history and put back.");
 		}
 		finally
 		{
@@ -828,6 +890,7 @@ internal static class UiChecks
 			var list = Control<ListBox>(dialog, "listSessions");
 			CheckRowSelectionIsVisible(list, "The Past Sessions list");
 			CheckChangesRowSelectionIsVisible(window);
+			CheckChangesActionsFollowTheFile(window);
 			Check.True(list.SelectionMode != SelectionMode.Single,
 				"The list must take more than one row, or a run of old sessions cannot be cleared in one pass.");
 
