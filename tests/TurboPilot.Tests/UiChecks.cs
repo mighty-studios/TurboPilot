@@ -505,6 +505,8 @@ internal static class UiChecks
 		var input = Control<RichTextBox>(window, "richTextBoxInput");
 		var width = window.ActualWidth;
 
+		CheckPlainTextPaste(window);
+
 		Check.True(!popup.IsOpen, "The command list stays shut until a command is typed.");
 		SetInput(window, "just a message");
 		Check.True(!popup.IsOpen, "An ordinary message must not summon the command list.");
@@ -541,6 +543,46 @@ internal static class UiChecks
 
 		input.Document.Blocks.Clear();
 		Console.WriteLine("PASS typed commands: completion list, keys, and local answer without a turn");
+	}
+
+	private static void CheckPlainTextPaste(MainWindow window)
+	{
+		var input = Control<RichTextBox>(window, "richTextBoxInput");
+		var previousInput = Input(window);
+		var previousClipboard = Clipboard.GetDataObject();
+		const string plainText = "plain clipboard representation";
+		try
+		{
+			var clipboardData = new DataObject();
+			clipboardData.SetData(DataFormats.UnicodeText, plainText);
+			clipboardData.SetData(DataFormats.Rtf,
+				@"{\rtf1\ansi{\fonttbl{\f0 Courier New;}}{\colortbl;\red255\green0\blue255;}\f0\fs40\cf1 rich clipboard representation}");
+			Clipboard.SetDataObject(clipboardData, true);
+
+			SetInput(window, string.Empty);
+			ApplicationCommands.Paste.Execute(null, input);
+			Check.Equal(plainText, Input(window), "Paste the clipboard's plain-text representation");
+
+			var pastedRuns = input.Document.Blocks.OfType<Paragraph>()
+				.SelectMany(paragraph => paragraph.Inlines.OfType<Run>())
+				.Where(run => run.Text.Length > 0)
+				.ToArray();
+			Check.True(pastedRuns.Length > 0, "Plain-text paste inserts text into the prompt.");
+			foreach (var run in pastedRuns)
+			{
+				Check.True(Equals(input.Foreground, run.Foreground), "Paste must not import the clipboard text color.");
+				Check.Equal(input.FontFamily, run.FontFamily, "Paste must not import the clipboard font.");
+				Check.Equal(input.FontSize, run.FontSize, "Paste must not import the clipboard font size.");
+			}
+		}
+		finally
+		{
+			if (previousClipboard is null)
+				Clipboard.Clear();
+			else
+				Clipboard.SetDataObject(previousClipboard, true);
+			SetInput(window, previousInput);
+		}
 	}
 
 	/// <summary>

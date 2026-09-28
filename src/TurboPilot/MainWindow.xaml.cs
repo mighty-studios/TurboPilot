@@ -126,6 +126,7 @@ public partial class MainWindow : TurbolandWindow
 		// Command completion follows what is typed in the prompt box.
 		richTextBoxInput.TextChanged += Input_TextChanged;
 		richTextBoxInput.LostKeyboardFocus += (_, _) => commandPopup.IsOpen = false;
+		DataObject.AddPastingHandler(richTextBoxInput, Input_Pasting);
 
 		// No session is active until the user starts or resumes one.
 		SetSessionActive(false);
@@ -1328,6 +1329,23 @@ public partial class MainWindow : TurbolandWindow
 		e.Handled = true;
 		if (buttonSend.IsEnabled)
 			_ = SendCurrentInputAsync();
+	}
+
+	private static void Input_Pasting(object sender, DataObjectPastingEventArgs e)
+	{
+		var format = e.DataObject.GetDataPresent(DataFormats.UnicodeText)
+			? DataFormats.UnicodeText
+			: e.DataObject.GetDataPresent(DataFormats.Text)
+				? DataFormats.Text
+				: null;
+		if (format is null)
+		{
+			e.CancelCommand();
+			return;
+		}
+
+		// Prefer the clipboard's text representation over RTF, XAML, or HTML.
+		e.FormatToApply = format;
 	}
 
 	/// <summary>
