@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.Json;
+using TurboPilot.Ai;
 using TurboPilot.Rendering;
 using TurboPilot.Tools;
 
@@ -139,8 +140,54 @@ internal static class RenderingChecks
 			"An empty disclosure says so rather than opening onto nothing.");
 		Console.WriteLine("PASS tool calls summarized, bounded, escaped, and shut by default");
 
+		CheckMultilineNotices();
 		CheckChangeCards();
 		CheckTranscriptExport();
+	}
+
+	/// <summary>
+	/// Notices whose text runs over several lines. What matters is that no
+	/// line break in the text reaches the markup: a blank line would end
+	/// the notice's HTML block and hand the rest to the markdown parser,
+	/// and a table or code block there swallows the closing tags, leaving
+	/// a shut tool card that hides everything written after it.
+	/// </summary>
+	private static void CheckMultilineNotices()
+	{
+		var outcome = ToolDetail.Outcome(true, null,
+			"Summary\n\n## Coverage\n\n| Need | Status |\n| --- | --- |\n| Web | Missing, cut mid-row\n\n    indented\n\n```\nopen fence");
+		var tool = NoticeFormatter.Tool("view", "notes.md", "path: notes.md\r\nview_range: 1, 40", "ok", outcome);
+		var status = NoticeFormatter.Status("error", "first\r\n\r\n    second");
+		var listing = NoticeFormatter.Listing("Details", "one\n\n| a |\n| - |");
+		var permission = NoticeFormatter.Permission("shell", "cd x\r\n\r\n| a |\r\n| - |");
+		foreach (var notice in new[] { tool, status, listing })
+			Check.True(notice.Rendered.IndexOfAny(['\r', '\n']) < 0,
+				"A notice must stay on one line whatever its text holds: " + notice.Text);
+		Check.True(tool.Rendered.Contains(">Summary&#10;&#10;## Coverage&#10;&#10;| Need | Status |")
+			&& tool.Rendered.Contains("path: notes.md&#10;view_range: 1, 40</pre>")
+			&& tool.Rendered.EndsWith("</pre></details></div>", StringComparison.Ordinal),
+			"A tool's text keeps its line breaks as character references inside a closed card.");
+		Check.True(permission.Rendered.Contains("<code>cd x&#10;&#10;| a |&#10;| - |</code></div>"),
+			"A multi-line command stays inside its permission card.");
+
+		// Earlier versions wrote the same markup with the line breaks left in.
+		static string Saved(string rendered) => rendered.Replace("&#10;", "\r\n");
+		foreach (var notice in new[] { tool, status, listing, permission })
+			Check.Equal(notice.Rendered, NoticeFormatter.Repair(Saved(notice.Rendered)),
+				"Repair a notice saved by an earlier version");
+		const string reply = "\r\n\r\nReply\r\n\r\n| x |\r\n| - |\r\n\r\n    code\r\n\r\n";
+		Check.Equal("**You:** go\r\n\r\n" + tool.Rendered + reply,
+			NoticeFormatter.Repair("**You:** go\r\n\r\n" + Saved(tool.Rendered) + reply),
+			"Repair leaves the conversation around a notice as written");
+		Check.Equal(tool.Rendered + reply, NoticeFormatter.Repair(tool.Rendered + reply),
+			"Repairing the current form changes nothing");
+
+		using var workspace = new TestWorkspace();
+		var record = workspace.Store.Create("saved-notices", new ChatSessionOptions { Model = "test-model" }, "");
+		workspace.Store.WriteRenderedTranscript(record.SessionId, Saved(tool.Rendered) + reply);
+		Check.Equal(tool.Rendered + reply, workspace.Store.ReadRenderedTranscript(record.SessionId),
+			"A saved session must open with its notices repaired");
+		Console.WriteLine("PASS multi-line notices kept whole, and saved ones repaired");
 	}
 
 	/// <summary>

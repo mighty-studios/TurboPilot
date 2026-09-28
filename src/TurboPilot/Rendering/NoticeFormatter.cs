@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using TurboPilot.Tools;
 
 namespace TurboPilot.Rendering;
@@ -14,10 +15,31 @@ namespace TurboPilot.Rendering;
 /// closing tags is still parsed normally; that matters for questions,
 /// whose text can carry a whole plan. Everything else is emitted as
 /// escaped HTML so a file path or a shell command can never be read as
-/// markup. Styling lives in web/output.css and BorlandVisionTheme.cs.
+/// markup. Escaping covers line breaks too: they are written as character
+/// references, because a blank line in a tool's output would otherwise end
+/// the block early and leave the card's closing tags to the markdown
+/// parser. Styling lives in web/output.css and BorlandVisionTheme.cs.
 /// </summary>
 internal static class NoticeFormatter
 {
+	// Escaped text inside a notice holds no tag, so it runs from its
+	// opening tag to the next one.
+	private static readonly Regex SavedText = new(
+		"""(?<open><pre class="kp-(?:tool-body|tool-outcome|listing-body)">|<span class="kp-status-text">|<div class="kp-card-detail">[^<]*<code>)(?<text>[^<]*)""",
+		RegexOptions.Compiled);
+
+	/// <summary>
+	/// Brings a Rendered transcript saved by an earlier version to the
+	/// current form. Those versions kept the line breaks in escaped text,
+	/// so a blank line in a tool's output ended the card's HTML block and
+	/// the rest was read as markdown. When that rest was a table or a code
+	/// block it swallowed the closing tags, and the card, left open, hid
+	/// everything written after it. Text already in the current form is
+	/// returned unchanged.
+	/// </summary>
+	public static string Repair(string rendered) =>
+		SavedText.Replace(rendered, match => match.Groups["open"].Value + EncodeLineBreaks(match.Groups["text"].Value));
+
 	/// <summary>A question with its answer choices.</summary>
 	public static (string Text, string Rendered) Question(string question, IReadOnlyList<string> choices, bool allowFreeform)
 	{
@@ -237,9 +259,12 @@ internal static class NoticeFormatter
 		return sb.Length == 0 ? "note" : sb.ToString();
 	}
 
-	private static string Escape(string text) => text
+	private static string Escape(string text) => EncodeLineBreaks(text
 		.Replace("&", "&amp;")
 		.Replace("<", "&lt;")
 		.Replace(">", "&gt;")
-		.Replace("\"", "&quot;");
+		.Replace("\"", "&quot;"));
+
+	private static string EncodeLineBreaks(string text) =>
+		text.Replace("\r\n", "\n").Replace('\r', '\n').Replace("\n", "&#10;");
 }

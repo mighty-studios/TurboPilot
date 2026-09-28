@@ -193,7 +193,7 @@ public sealed class SessionStore
 	public string ReadRenderedTranscript(string sessionId)
 	{
 		var path = FilePath(sessionId, ".rendered.md");
-		return File.Exists(path) ? File.ReadAllText(path) : ReadTranscript(sessionId);
+		return File.Exists(path) ? Rendering.NoticeFormatter.Repair(File.ReadAllText(path)) : ReadTranscript(sessionId);
 	}
 
 	public void AppendTranscript(string sessionId, string text) =>
