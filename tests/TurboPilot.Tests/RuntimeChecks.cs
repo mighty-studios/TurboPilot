@@ -204,7 +204,9 @@ internal static class RuntimeChecks
 					ToolArguments: """{"command":"Set-Content -Path changed.txt -Value TurboPilotChangeProbe","description":"Write a fixture file"}"""));
 				provider.Replies.Enqueue(new LocalProvider.Reply("File written."));
 				await SendAndWaitAsync(resumed, "write a file into the workspace");
-				await Check.UntilAsync(() => resumed.Transcript.Contains("changed.txt"),
+				// The report is written after the turn goes idle, and the
+				// tool line already names the file, so wait for the report.
+				await Check.UntilAsync(() => resumed.Transcript.Contains("+ changed.txt"),
 					"The turn did not report the file it created.");
 				Check.True(resumed.Transcript.Contains("Changes (") && resumed.Transcript.Contains("+ changed.txt"),
 					"A turn that changed the workspace must say so: " + resumed.Transcript);
@@ -331,7 +333,8 @@ internal static class RuntimeChecks
 			await Check.ThrowsAsync<OperationCanceledException>(() => starting);
 			Console.WriteLine("PASS canceling startup and disposing the runtime");
 		}
-		Check.Equal(0, provider.Errors.Count, "The local provider must not hide request failures");
+		Check.Equal(0, provider.Errors.Count, "The local provider must not hide request failures: "
+			+ string.Join(" | ", provider.Errors.Distinct()));
 	}
 
 	internal static CopilotSession GetSession(ChatService chat) =>

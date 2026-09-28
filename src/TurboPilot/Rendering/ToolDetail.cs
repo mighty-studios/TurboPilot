@@ -35,6 +35,33 @@ internal static class ToolDetail
 	private static readonly string[] OldKeys = ["old_str", "oldString", "old_string"];
 	private static readonly string[] NewKeys = ["new_str", "newString", "new_string"];
 
+	// Tools the agent calls to hand its answer back, and the argument
+	// that carries the answer.
+	private static readonly Dictionary<string, string> ReplyTools = new(StringComparer.Ordinal)
+	{
+		["task_complete"] = "summary",
+	};
+
+	/// <summary>
+	/// The answer a tool call carries, when the call is how the agent
+	/// replies. An agent working on its own ends the task by calling a
+	/// tool with an account of what it did, and for many models that
+	/// account is the only answer the turn produces. It is written for
+	/// the reader, in markdown, so it is returned here to be shown as
+	/// the reply it is rather than filed away among the tool calls.
+	/// Null for any other call, and for a finishing call that says
+	/// nothing.
+	/// </summary>
+	internal static string? Reply(string? toolName, JsonElement? arguments)
+	{
+		if (toolName is null || !ReplyTools.TryGetValue(toolName.Trim(), out var key))
+			return null;
+		if (arguments is not { ValueKind: JsonValueKind.Object } args)
+			return null;
+		var reply = FirstOf(args, [key])?.Trim();
+		return string.IsNullOrEmpty(reply) ? null : reply;
+	}
+
 	/// <summary>
 	/// Reduces a tool call to a one-line headline and an openable body.
 	/// </summary>

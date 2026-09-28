@@ -50,9 +50,11 @@ public sealed partial class ChatService : IAsyncDisposable
 	private Task _planTail = Task.CompletedTask;
 
 	// Tool calls awaiting their outcome, so the completion can be
-	// written into the card the start opened rather than printed as a
-	// second entry the reader has to pair up by eye.
-	private sealed record ToolRecord(string Name, string Headline, string Body);
+	// written into the row the start opened rather than printed as a
+	// second entry the reader has to pair up by eye. A call that carries
+	// the agent's answer is shown as that answer, and is held only so
+	// its failure can still be reported.
+	private sealed record ToolRecord(string Name, string Headline, string Body, bool IsReply = false);
 	private readonly Dictionary<string, ToolRecord> _toolCalls = [];
 
 	// Where the workspace stood when the turn began, and when the
@@ -654,7 +656,7 @@ public sealed partial class ChatService : IAsyncDisposable
 						Progress = null;
 						// A tool call that never reported an outcome cannot
 						// get one now, and holding its record would leak.
-						_toolCalls.Clear();
+						SettleToolCalls();
 						if (_turnIdle is null || _turnIdle.Task.IsCompleted)
 							_turnIdle = new(TaskCreationOptions.RunContinuationsAsynchronously);
 						StateChanged?.Invoke();
@@ -737,6 +739,7 @@ public sealed partial class ChatService : IAsyncDisposable
 						_streamedMessages.Clear();
 						_completedMessages.Clear();
 						_messageBuffers.Clear();
+						SettleToolCalls();
 						ReportChanges();
 						if (_pendingChanges is not null)
 							_ = Task.Run(ApplyPendingChangesAsync);
@@ -861,14 +864,30 @@ public sealed partial class ChatService : IAsyncDisposable
 	}
 
 	/// <summary>
-	/// Prints the tool call that is starting. The card carries the
+	/// Prints the tool call that is starting. The row carries the
 	/// headline and the arguments, and is kept under the tool call id
-	/// so the outcome can be written into the same card rather than
+	/// so the outcome can be written into the same row rather than
 	/// printed as a second entry the reader has to pair up by eye.
+	///
+	/// A call that hands back the agent's answer is printed as that
+	/// answer instead; see <see cref="ToolDetail.Reply"/>. It is shown
+	/// as soon as the call starts, because the answer is whole by then
+	/// and a turn stopped before the call returns should not lose it.
 	/// </summary>
 	private void ShowToolStart(ToolExecutionStartData data)
 	{
 		var name = string.IsNullOrWhiteSpace(data.ToolName) ? "tool" : data.ToolName;
+		var id = "tool:" + (data.ToolCallId ?? Guid.NewGuid().ToString("N"));
+		if (ToolDetail.Reply(name, data.Arguments) is { } reply)
+		{
+			lock (_sync)
+			{
+				_toolCalls[id] = new ToolRecord(name, string.Empty, string.Empty, IsReply: true);
+				ShowReply("reply:" + id, reply);
+			}
+			return;
+		}
+
 		// The shell driver strips a redundant leading directory change
 		// before spawning, and the headline should say what actually
 		// runs. The property is marked for evaluation; the fallback
@@ -877,23 +896,40 @@ public sealed partial class ChatService : IAsyncDisposable
 		var shellCommand = data.ShellToolInfo?.DisplayCommand;
 #pragma warning restore GHCP001
 		var described = ToolDetail.Describe(name, data.Arguments, shellCommand);
-		var card = NoticeFormatter.Tool(name, described.Headline, described.Body);
+		var row = NoticeFormatter.Tool(name, described.Headline, described.Body);
 		lock (_sync)
 		{
-			var id = "tool:" + (data.ToolCallId ?? Guid.NewGuid().ToString("N"));
 			_toolCalls[id] = new ToolRecord(name, described.Headline, described.Body);
-			EmitTranscript("\r\n" + card.Text + "\r\n\r\n", id, "\r\n\r\n" + card.Rendered + "\r\n\r\n");
+			EmitTranscript("\r\n" + row.Text + "\r\n\r\n", id, "\r\n\r\n" + row.Rendered + "\r\n\r\n");
 		}
 	}
 
 	/// <summary>
-	/// Finishes the card a tool call opened: marks it done or failed and
+	/// Writes an answer the agent handed back through a tool the way a
+	/// reply it wrote is written: plain in the Raw tab, markdown in the
+	/// Rendered one, with its file references linked.
+	/// </summary>
+	private void ShowReply(string messageId, string reply)
+	{
+		// The Rendered part keeps the blank line that separates it from
+		// whatever came before, including after its links are applied.
+		var rendered = "\r\n\r\n" + reply;
+		EmitTranscript("\r\n" + reply + "\r\n\r\n", messageId, rendered + "\r\n\r\n");
+		if (_capture is null && _options.LinkFiles)
+			QueueFormatting(messageId, rendered);
+	}
+
+	/// <summary>
+	/// Finishes the row a tool call opened: marks it done or failed and
 	/// files the output inside it.
 	///
 	/// Raw keeps the tool result as plain text as well as the initial
-	/// tool line. The Rendered card can replace its contents in place,
+	/// tool line. The Rendered row can replace its contents in place,
 	/// but Raw must retain the complete stream without requiring the
-	/// reader to open a disclosure.
+	/// reader to open a disclosure. A failure is said once more in Raw
+	/// only: the Rendered row already shows it, and so does the line a
+	/// run of rows is folded into, while a separate notice there would
+	/// break the run apart at every failure.
 	/// </summary>
 	private void ShowToolComplete(ToolExecutionCompleteData data)
 	{
@@ -905,16 +941,45 @@ public sealed partial class ChatService : IAsyncDisposable
 				return;
 		}
 
+		var outcome = ToolDetail.Outcome(data.Success, data.Error?.Message, data.Result?.Content);
+		var failure = started.Name + " failed: " + ShortText.Clip(outcome, 200);
+		if (started.IsReply)
+		{
+			// The answer is already in the transcript, and the result only
+			// repeats it. There is no row to mark, so a refusal is said.
+			if (!data.Success)
+				AddNotice("[tool] " + failure, NoticeFormatter.Status("error", failure).Rendered);
+			return;
+		}
+
 		var rawOutcome = data.Success
 			? data.Result?.Content ?? string.Empty
 			: string.IsNullOrWhiteSpace(data.Error?.Message) ? "Failed." : data.Error!.Message;
-		var outcome = ToolDetail.Outcome(data.Success, data.Error?.Message, data.Result?.Content);
-		var card = NoticeFormatter.Tool(started.Name, started.Headline, started.Body,
+		var row = NoticeFormatter.Tool(started.Name, started.Headline, started.Body,
 			data.Success ? "ok" : "failed", outcome);
-		ReplaceRendered(id, card.Rendered);
+		ReplaceRendered(id, row.Rendered);
 		AppendRawToolResult(rawOutcome);
 		if (!data.Success)
-			AddNotice("[tool] " + started.Name + " failed: " + ShortText.Clip(outcome, 200));
+			AppendRaw("\r\n[tool] " + failure + "\r\n\r\n");
+	}
+
+	/// <summary>
+	/// Closes the rows of tool calls that will never report back, so none
+	/// is left looking busy once its turn is over. A stopped turn is the
+	/// usual cause.
+	/// </summary>
+	private void SettleToolCalls()
+	{
+		lock (_sync)
+		{
+			foreach (var (id, call) in _toolCalls)
+			{
+				if (!call.IsReply)
+					ReplaceRendered(id, NoticeFormatter.Tool(call.Name, call.Headline, call.Body,
+						"stopped", "Stopped before it reported an outcome.").Rendered);
+			}
+			_toolCalls.Clear();
+		}
 	}
 
 	/// <summary>Where the workspace stood when this turn began.</summary>
@@ -1034,11 +1099,21 @@ public sealed partial class ChatService : IAsyncDisposable
 
 	private void AppendRawToolResult(string outcome)
 	{
-		if (string.IsNullOrEmpty(outcome))
-			return;
+		if (!string.IsNullOrEmpty(outcome))
+			AppendRaw("\r\n[tool result]\r\n" + outcome + "\r\n\r\n");
+	}
+
+	/// <summary>
+	/// Writes text the Raw tab needs and the Rendered tab already shows in
+	/// a form of its own.
+	/// </summary>
+	private void AppendRaw(string text)
+	{
 		lock (_sync)
 		{
-			var text = "\r\n[tool result]\r\n" + outcome + "\r\n\r\n";
+			// Nothing but the reply of a captured turn is kept.
+			if (_capture is not null)
+				return;
 			_transcript.Append(text);
 			if (_record is not null && _historyActive)
 			{

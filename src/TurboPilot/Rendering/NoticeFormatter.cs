@@ -17,7 +17,7 @@ namespace TurboPilot.Rendering;
 /// escaped HTML so a file path or a shell command can never be read as
 /// markup. Escaping covers line breaks too: they are written as character
 /// references, because a blank line in a tool's output would otherwise end
-/// the block early and leave the card's closing tags to the markdown
+/// the block early and leave the notice's closing tags to the markdown
 /// parser. Styling lives in web/output.css and BorlandVisionTheme.cs.
 /// </summary>
 internal static class NoticeFormatter
@@ -28,17 +28,27 @@ internal static class NoticeFormatter
 		"""(?<open><pre class="kp-(?:tool-body|tool-outcome|listing-body)">|<span class="kp-status-text">|<div class="kp-card-detail">[^<]*<code>)(?<text>[^<]*)""",
 		RegexOptions.Compiled);
 
+	// A tool row's opening tag, in any form a saved transcript can hold.
+	private static readonly Regex SavedToolRow = new(
+		"""<div class="(?:kp-card )?kp-tool kp-tool-(?<state>running|ok|failed|stopped)">""",
+		RegexOptions.Compiled);
+
 	/// <summary>
 	/// Brings a Rendered transcript saved by an earlier version to the
 	/// current form. Those versions kept the line breaks in escaped text,
 	/// so a blank line in a tool's output ended the card's HTML block and
 	/// the rest was read as markdown. When that rest was a table or a code
 	/// block it swallowed the closing tags, and the card, left open, hid
-	/// everything written after it. Text already in the current form is
-	/// returned unchanged.
+	/// everything written after it. They also framed every tool call as a
+	/// card; it is now a row. A row saved while its call was running is
+	/// marked stopped, because nothing read back from disk can still be
+	/// running. Anything else already in the current form is returned
+	/// unchanged.
 	/// </summary>
 	public static string Repair(string rendered) =>
-		SavedText.Replace(rendered, match => match.Groups["open"].Value + EncodeLineBreaks(match.Groups["text"].Value));
+		SavedToolRow.Replace(
+			SavedText.Replace(rendered, match => match.Groups["open"].Value + EncodeLineBreaks(match.Groups["text"].Value)),
+			match => ToolRowTag(match.Groups["state"].Value == "running" ? "stopped" : match.Groups["state"].Value));
 
 	/// <summary>A question with its answer choices.</summary>
 	public static (string Text, string Rendered) Question(string question, IReadOnlyList<string> choices, bool allowFreeform)
@@ -107,28 +117,27 @@ internal static class NoticeFormatter
 	}
 
 	/// <summary>
-	/// A tool call. The headline is the one line worth seeing without
-	/// asking; everything else is behind a disclosure, shut by default,
-	/// because a turn can run twenty tools and a transcript that showed
-	/// all of them in full would be unreadable.
+	/// A tool call, as one row of the transcript. The headline is the one
+	/// line worth seeing without asking; everything else is behind a
+	/// disclosure, shut by default, because a turn can run twenty tools
+	/// and a transcript that showed all of them in full would be
+	/// unreadable. The row is unframed on purpose: a tool call is a step
+	/// in the work, not a message, and the reply around it is what the
+	/// transcript is for. The Rendered view folds a run of rows into a
+	/// single line (see web/output.js); the text keeps one row per call.
 	///
 	/// The disclosure is plain HTML rather than script, so it works the
 	/// same in a saved copy of the transcript as it does on screen.
 	/// </summary>
+	/// <param name="state">ok, failed or stopped; anything else is still running.</param>
 	public static (string Text, string Rendered) Tool(string name, string headline, string body,
 		string? state = null, string? outcome = null)
 	{
-		var kind = state switch
-		{
-			"ok" => "kp-tool-ok",
-			"failed" => "kp-tool-failed",
-			_ => "kp-tool-running",
-		};
 		var text = new StringBuilder("[tool] ").Append(name);
 		if (headline.Length > 0)
 			text.Append("  ").Append(headline);
 
-		var rendered = new StringBuilder("<div class=\"kp-card kp-tool ").Append(kind).Append("\">")
+		var rendered = new StringBuilder(ToolRowTag(state))
 			.Append("<details><summary>")
 			.Append("<span class=\"kp-tool-name\">").Append(Escape(name)).Append("</span>")
 			.Append("<span class=\"kp-tool-head\">").Append(Escape(headline)).Append("</span>")
@@ -142,6 +151,12 @@ internal static class NoticeFormatter
 		rendered.Append("</details></div>");
 		return (text.ToString(), rendered.ToString());
 	}
+
+	private static string ToolRowTag(string? state) => "<div class=\"kp-tool kp-tool-" + (state switch
+	{
+		"ok" or "failed" or "stopped" => state,
+		_ => "running",
+	}) + "\">";
 
 	/// <summary>
 	/// What a turn did to the files on disk. Capped, because a card

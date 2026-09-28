@@ -2,7 +2,9 @@
  *
  * The Rendered tab follows the Raw tab: the host appends to both and
  * this file renders its copy as a single markdown document (markdown,
- * Mermaid diagrams, inline images). Application notices and file links
+ * Mermaid diagrams, inline images). Every render rebuilds the document,
+ * but a diagram already drawn is carried into the new one rather than
+ * drawn again (see placeDiagrams). Application notices and file links
  * are marked up on the way in, so the two tabs read the same without
  * being character for character identical. Nothing here is
  * user-editable. Called from MainWindow.xaml.cs via
@@ -17,14 +19,17 @@
  *   scrollToTop()                          - show the first line and stop
  *                                            following the bottom
  *
- * Application notices (questions, permission requests, tool steps,
+ * Application notices (questions, permission requests, tool calls,
  * errors and session banners) arrive in that same stream as small
  * blocks of literal HTML written by NoticeFormatter.cs: .kp-card with
  * .kp-card-title/.kp-card-detail/.kp-card-choices/.kp-card-hint,
- * .kp-status with .kp-status-tag/.kp-status-text, and .kp-banner. They
- * need no scripting here; markdown inside a card is parsed normally
- * because an HTML block ends at the following blank line. Their styling
- * is in output.css and BorlandVisionTheme.cs.
+ * .kp-tool rows, .kp-status with .kp-status-tag/.kp-status-text, and
+ * .kp-banner. Markdown inside a card is parsed normally because an HTML
+ * block ends at the following blank line. The only scripting they get
+ * runs after each render: a run of consecutive tool rows is folded into
+ * one .kp-tools line, and any disclosure the reader had open is opened
+ * again (see foldToolRuns and restoreDisclosures). Their styling is in
+ * output.css and BorlandVisionTheme.cs.
  *
  * Block API (structured rendering, reserved for future use):
  *   appendBlock(id, kind, label, content, isMarkdown)
@@ -69,6 +74,10 @@
 	var transcriptDiagramTimer = 0;
 	var TRANSCRIPT_RENDER_MS = 40;   // coalesce rapid appends while streaming
 	var TRANSCRIPT_DIAGRAM_MS = 300; // convert diagrams once the stream pauses
+
+	// Drawn diagrams, each in its zoom frame, by the key placeDiagrams gives
+	// its fenced block. See placeDiagrams.
+	var drawnDiagrams = Object.create(null);
 
 	// Debounce timer for streaming renders
 	var renderTimers = {};
@@ -270,38 +279,77 @@
 	}
 
 	function processMermaidBlocks(containerEl) {
-		var codeBlocks = containerEl.querySelectorAll("pre code.language-mermaid");
+		var codeBlocks = containerEl.querySelectorAll("pre > code.language-mermaid");
 		if (codeBlocks.length === 0) return;
 
 		loadMermaid(function () {
+			var nodes = [];
+			var keys = [];
 			for (var i = 0; i < codeBlocks.length; i++) {
-				var codeEl = codeBlocks[i];
-				var preEl = codeEl.parentElement;
-				var source = codeEl.textContent;
-
+				var preEl = codeBlocks[i].parentElement;
+				// A render since this pass began has replaced the block.
+				if (!containerEl.contains(preEl)) continue;
 				var container = document.createElement("div");
 				container.className = "mermaid-container";
-				container.textContent = source;
+				container.textContent = codeBlocks[i].textContent;
 				preEl.replaceWith(container);
+				// The frame goes on first, so the diagram is drawn, and
+				// measured, where it will stay. The frame itself measures
+				// nothing until the reader pans or zooms.
+				makeZoomable(container, "mermaid");
+				nodes.push(container);
+				keys.push(preEl.getAttribute("data-kp-diagram"));
 			}
-			// Use mermaid.run() to render all .mermaid-container elements
-			var nodes = containerEl.querySelectorAll(".mermaid-container");
+			if (nodes.length === 0) return;
+			var drawing = null;
 			try {
-				mermaid.run({ nodes: nodes });
+				drawing = mermaid.run({ nodes: nodes });
 			} catch (e) {
 				console.warn("Mermaid render error:", e);
 			}
-			// Wrap each rendered diagram in a pan/zoom viewport.
-			// Mermaid renders asynchronously; defer to next tick so the SVG exists.
-			// Once the SVGs are in the DOM the document height has grown,
-			// so re-anchor to the bottom for any user who is still pinned.
-			setTimeout(function () {
+			Promise.resolve(drawing).catch(function (e) {
+				console.warn("Mermaid render error:", e);
+			}).then(function () {
+				// A diagram is kept only if it stayed in the document while
+				// it was drawn. One taken out by a later render was measured
+				// out of place, and the next pass draws it again.
 				for (var j = 0; j < nodes.length; j++) {
-					makeZoomable(nodes[j], "mermaid");
+					var frame = nodes[j].closest(".kp-zoom-wrap");
+					if (keys[j] && frame && nodes[j].isConnected && nodes[j].querySelector("svg"))
+						drawnDiagrams[keys[j]] = frame;
 				}
+				// The drawings have grown the document, so re-anchor to the
+				// bottom for a reader who is still pinned there.
 				scrollToBottom();
-			}, 0);
+			});
 		});
+	}
+
+	// Every render rebuilds the document from the transcript text, and
+	// drawing a diagram is slow and done out of turn. So a drawn diagram is
+	// kept, in its zoom frame, and put back in place of the fenced block the
+	// next render makes of the same source. Without that, a streaming render
+	// showed every diagram in the transcript as source text, and each tool
+	// call that finished drew them all again. Moving the frame rather than a
+	// copy keeps its pan and zoom and its handlers. A source that appears
+	// twice is kept once per appearance, since an element stands in one
+	// place, and one no longer in the transcript is let go.
+	function placeDiagrams(root) {
+		var codeBlocks = root.querySelectorAll("pre > code.language-mermaid");
+		var seen = Object.create(null);
+		var present = Object.create(null);
+		for (var i = 0; i < codeBlocks.length; i++) {
+			var source = codeBlocks[i].textContent;
+			seen[source] = (seen[source] || 0) + 1;
+			var key = seen[source] + ":" + source;
+			present[key] = true;
+			var preEl = codeBlocks[i].parentElement;
+			if (drawnDiagrams[key]) preEl.replaceWith(drawnDiagrams[key]);
+			else preEl.setAttribute("data-kp-diagram", key);
+		}
+		for (var kept in drawnDiagrams) {
+			if (!present[kept]) delete drawnDiagrams[kept];
+		}
 	}
 
 	function processOversizedBlocks(containerEl) {
@@ -527,13 +575,135 @@
 	// this one rendered for human viewing.
 
 	function renderTranscript(withDiagrams) {
+		var shown = disclosureState(outputEl);
 		outputEl.innerHTML = renderMarkdown(transcriptText);
+		foldToolRuns(outputEl);
+		restoreDisclosures(outputEl, shown);
 		highlightCodeIn(outputEl);
+		placeDiagrams(outputEl);
 		if (withDiagrams) {
 			processMermaidBlocks(outputEl);
 			processOversizedBlocks(outputEl);
 		}
 		scrollToBottom();
+	}
+
+	// -- Tool rows ---------------------------------------------------
+	//
+	// NoticeFormatter.cs writes each tool call as a one-line row
+	// (.kp-tool). Rows with nothing between them are one burst of work
+	// between two passages of the reply, so they are folded under a
+	// single line that counts the calls by name. A lone call is left as
+	// it is. The fold exists only on screen: the transcript text keeps
+	// one row per call, so the Raw tab and a saved session are unchanged.
+
+	function foldToolRuns(root) {
+		var runs = [];
+		var run = null;
+		for (var node = root.firstElementChild; node; node = node.nextElementSibling) {
+			if (node.classList.contains("kp-tool")) {
+				if (!run) { run = []; runs.push(run); }
+				run.push(node);
+			} else {
+				run = null;
+			}
+		}
+		for (var i = 0; i < runs.length; i++) {
+			if (runs[i].length > 1) foldToolRun(runs[i]);
+		}
+	}
+
+	function foldToolRun(rows) {
+		var counts = Object.create(null);
+		var names = [];
+		var failed = 0;
+		var running = false;
+		for (var i = 0; i < rows.length; i++) {
+			var label = rows[i].querySelector(".kp-tool-name");
+			var name = label ? label.textContent : "tool";
+			if (!(name in counts)) { counts[name] = 0; names.push(name); }
+			counts[name]++;
+			if (rows[i].classList.contains("kp-tool-failed")) failed++;
+			if (rows[i].classList.contains("kp-tool-running")) running = true;
+		}
+		var tally = [];
+		for (var j = 0; j < names.length; j++) {
+			tally.push(counts[names[j]] > 1 ? names[j] + " x" + counts[names[j]] : names[j]);
+		}
+
+		var fold = document.createElement("details");
+		fold.className = running ? "kp-tools kp-tools-running" : "kp-tools";
+		var summary = document.createElement("summary");
+		summary.appendChild(textSpan("kp-tools-tag", "tools"));
+		summary.appendChild(textSpan("kp-tools-text", rows.length + " calls: " + tally.join(", ")));
+		if (failed) summary.appendChild(textSpan("kp-tools-failed", failed + " failed"));
+		var body = document.createElement("div");
+		body.className = "kp-tools-body";
+		fold.appendChild(summary);
+		fold.appendChild(body);
+		rows[0].parentNode.insertBefore(fold, rows[0]);
+		for (var k = 0; k < rows.length; k++) body.appendChild(rows[k]);
+	}
+
+	function textSpan(className, text) {
+		var span = document.createElement("span");
+		span.className = className;
+		span.textContent = text;
+		return span;
+	}
+
+	// -- Open disclosures ---------------------------------------------
+	//
+	// Every render rebuilds the document, so a disclosure the reader had
+	// opened would snap shut the moment more output arrived. Each one is
+	// named by its place in the transcript, which later output does not
+	// change, and the ones that were open are opened again. A tool row
+	// is named by its count among the rows and a fold by its first row,
+	// so a fold that gains a row is still the same fold.
+
+	function keyDisclosures(root) {
+		var all = root.querySelectorAll("details");
+		var rows = 0;
+		var others = 0;
+		var folds = [];
+		for (var i = 0; i < all.length; i++) {
+			var item = all[i];
+			if (item.classList.contains("kp-tools")) { folds.push(item); continue; }
+			var parent = item.parentElement;
+			item.setAttribute("data-kp-key", parent && parent.classList.contains("kp-tool")
+				? "tool-" + (rows++)
+				: "details-" + (others++));
+		}
+		for (var j = 0; j < folds.length; j++) {
+			var first = folds[j].querySelector(".kp-tool > details");
+			folds[j].setAttribute("data-kp-key", "tools-" + (first ? first.getAttribute("data-kp-key") : j));
+		}
+	}
+
+	function disclosureState(root) {
+		var state = { open: Object.create(null), seen: Object.create(null) };
+		var all = root.querySelectorAll("details[data-kp-key]");
+		for (var i = 0; i < all.length; i++) {
+			var key = all[i].getAttribute("data-kp-key");
+			state.seen[key] = true;
+			if (all[i].open) state.open[key] = true;
+		}
+		return state;
+	}
+
+	function restoreDisclosures(root, state) {
+		keyDisclosures(root);
+		var all = root.querySelectorAll("details[data-kp-key]");
+		for (var i = 0; i < all.length; i++) {
+			if (state.open[all[i].getAttribute("data-kp-key")]) all[i].open = true;
+		}
+		// A fold that has just formed around a row the reader had open
+		// opens with it, rather than hiding the row it took in.
+		var folds = root.querySelectorAll("details.kp-tools");
+		for (var j = 0; j < folds.length; j++) {
+			if (state.seen[folds[j].getAttribute("data-kp-key")]) continue;
+			if (folds[j].querySelector(".kp-tool > details[open]")) folds[j].open = true;
+		}
 	}
 
 	/**
@@ -745,6 +915,7 @@
 		}
 		renderTimers = {};
 		transcriptText = "";
+		drawnDiagrams = Object.create(null);
 		if (transcriptRenderTimer) { clearTimeout(transcriptRenderTimer); transcriptRenderTimer = 0; }
 		if (transcriptDiagramTimer) { clearTimeout(transcriptDiagramTimer); transcriptDiagramTimer = 0; }
 		// Reset sticky-scroll: an empty document is trivially "at bottom"

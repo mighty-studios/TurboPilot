@@ -124,8 +124,10 @@ internal static class RenderingChecks
 
 		var running = NoticeFormatter.Tool("powershell", "git status", "command: git status");
 		Check.Equal("[tool] powershell  git status", running.Text, "Keep one plain tool line in the Raw tab");
-		Check.True(running.Rendered.Contains("kp-tool-running") && running.Rendered.Contains("<details><summary>"),
-			"A running tool is a card whose detail is shut until asked for.");
+		Check.True(running.Rendered.StartsWith("<div class=\"kp-tool kp-tool-running\"><details><summary>", StringComparison.Ordinal),
+			"A running tool is a row whose detail is shut until asked for.");
+		Check.True(!running.Rendered.Contains("kp-card"),
+			"A tool call is an unframed row, not a panel that competes with the reply.");
 		Check.True(!running.Rendered.Contains("<details open"), "Tool detail must never open itself.");
 
 		var failed = NoticeFormatter.Tool("powershell", "rm <x>", "command: rm <x>", "failed", "No such <file>");
@@ -133,12 +135,24 @@ internal static class RenderingChecks
 			&& failed.Rendered.Contains("rm &lt;x&gt;")
 			&& failed.Rendered.Contains("No such &lt;file&gt;"),
 			"A failed tool is marked as such and cannot inject markup.");
+		Check.True(NoticeFormatter.Tool("rg", "TODO", "pattern: TODO", "stopped", "Stopped.").Rendered
+				.StartsWith("<div class=\"kp-tool kp-tool-stopped\">", StringComparison.Ordinal),
+			"A call that will never report is marked stopped, not left running.");
 
 		var bare = NoticeFormatter.Tool("ask_user", "", "", "ok", "");
 		Check.Equal("[tool] ask_user", bare.Text, "A tool with nothing to show still names itself");
 		Check.True(bare.Rendered.Contains("No detail was reported."),
 			"An empty disclosure says so rather than opening onto nothing.");
-		Console.WriteLine("PASS tool calls summarized, bounded, escaped, and shut by default");
+
+		Check.Equal("**Done.** See `notes.md`.",
+			ToolDetail.Reply("task_complete", Args("""{"summary":"  **Done.** See `notes.md`.\n"}""")),
+			"The finishing tool's summary is the reply, as written");
+		Check.True(ToolDetail.Reply("task_complete", Args("""{"summary":"   "}""")) is null
+				&& ToolDetail.Reply("task_complete", null) is null,
+			"A finishing call that says nothing stays an ordinary tool row.");
+		Check.True(ToolDetail.Reply("powershell", Args("""{"summary":"not a reply"}""")) is null,
+			"Only the finishing tool carries a reply.");
+		Console.WriteLine("PASS tool calls summarized, bounded, escaped, shut by default, and the finishing summary kept as the reply");
 
 		CheckMultilineNotices();
 		CheckChangeCards();
@@ -166,7 +180,7 @@ internal static class RenderingChecks
 		Check.True(tool.Rendered.Contains(">Summary&#10;&#10;## Coverage&#10;&#10;| Need | Status |")
 			&& tool.Rendered.Contains("path: notes.md&#10;view_range: 1, 40</pre>")
 			&& tool.Rendered.EndsWith("</pre></details></div>", StringComparison.Ordinal),
-			"A tool's text keeps its line breaks as character references inside a closed card.");
+			"A tool's text keeps its line breaks as character references inside a closed row.");
 		Check.True(permission.Rendered.Contains("<code>cd x&#10;&#10;| a |&#10;| - |</code></div>"),
 			"A multi-line command stays inside its permission card.");
 
@@ -182,9 +196,18 @@ internal static class RenderingChecks
 		Check.Equal(tool.Rendered + reply, NoticeFormatter.Repair(tool.Rendered + reply),
 			"Repairing the current form changes nothing");
 
+		// Earlier versions also framed each tool call as a card, and a
+		// session closed mid-call saved its row as still running.
+		static string Framed(string rendered) => rendered.Replace("<div class=\"kp-tool ", "<div class=\"kp-card kp-tool ");
+		Check.Equal(tool.Rendered, NoticeFormatter.Repair(Framed(Saved(tool.Rendered))),
+			"Repair a tool card saved by an earlier version into a row");
+		var interrupted = NoticeFormatter.Repair(Framed(NoticeFormatter.Tool("rg", "TODO", "pattern: TODO").Rendered));
+		Check.True(interrupted.StartsWith("<div class=\"kp-tool kp-tool-stopped\">", StringComparison.Ordinal),
+			"A row saved while its call ran is read back as stopped: " + interrupted);
+
 		using var workspace = new TestWorkspace();
 		var record = workspace.Store.Create("saved-notices", new ChatSessionOptions { Model = "test-model" }, "");
-		workspace.Store.WriteRenderedTranscript(record.SessionId, Saved(tool.Rendered) + reply);
+		workspace.Store.WriteRenderedTranscript(record.SessionId, Framed(Saved(tool.Rendered)) + reply);
 		Check.Equal(tool.Rendered + reply, workspace.Store.ReadRenderedTranscript(record.SessionId),
 			"A saved session must open with its notices repaired");
 		Console.WriteLine("PASS multi-line notices kept whole, and saved ones repaired");

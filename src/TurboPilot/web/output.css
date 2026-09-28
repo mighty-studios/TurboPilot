@@ -314,40 +314,83 @@ input[type="radio"] {
 	display: block;
 }
 
-/* A tool call: a headline always visible, the arguments and the output
-   behind a disclosure that is shut until the reader asks. */
-.kp-tool > details > summary {
+/* A tool call: one unframed row, its name and what it was asked to do,
+   with the arguments and the output behind a disclosure that is shut
+   until the reader asks. A call is a step in the work, not a message,
+   so it stays quiet beside the reply. output.js folds a run of rows
+   into one .kp-tools line, which opens the same way. */
+.kp-tool,
+.kp-tools {
+	margin: 1px 0;
+}
+.kp-tool > details > summary,
+.kp-tools > summary {
 	cursor: pointer;
 	display: flex;
 	gap: 8px;
 	list-style: none;
 }
-.kp-tool > details > summary::-webkit-details-marker {
+.kp-tool > details > summary::-webkit-details-marker,
+.kp-tools > summary::-webkit-details-marker {
 	display: none;
 }
-.kp-tool > details > summary::before {
+.kp-tool > details > summary::before,
+.kp-tools > summary::before {
 	content: "[+]";
 	flex: none;
 	white-space: pre;
 }
-.kp-tool > details[open] > summary::before {
+.kp-tool > details[open] > summary::before,
+.kp-tools[open] > summary::before {
 	content: "[-]";
 }
-.kp-tool-name {
+.kp-tool-name,
+.kp-tools-tag,
+.kp-tools-failed {
 	flex: none;
 }
-.kp-tool-head {
+.kp-tools-tag {
+	text-transform: uppercase;
+}
+.kp-tool-head,
+.kp-tools-text {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
-.kp-tool-body,
-.kp-tool-outcome {
-	margin: 4px 0 0 0;
-	padding: 0;
+/* The rows of a run sit under its line, their headlines in one column. */
+.kp-tools-body {
+	margin: 1px 0 4px calc(3ch + 8px);
+}
+.kp-tools-body .kp-tool-name {
+	min-width: 11ch;
+}
+/* The detail drops a black window under the headline, in line with the
+   tool's name, the way the IDE opened a window on the desktop. */
+#output .kp-tool-body,
+#output .kp-tool-outcome {
+	margin: 2px 0 2px calc(3ch + 8px);
+	padding: 4px 8px;
+	border: 1px solid var(--bv-panel-border);
+	max-height: 320px;
+	overflow: auto;
 	white-space: pre-wrap;
 	word-break: break-word;
 	font: inherit;
+}
+.kp-tool > details[open] {
+	margin-bottom: 4px;
+}
+/* Work still under way ends in the blinking text-mode cursor. */
+.kp-tool-running > details > summary::after,
+.kp-tools-running > summary::after {
+	content: "_";
+	flex: none;
+	animation: kp-cursor 1s infinite;
+}
+@keyframes kp-cursor {
+	0%, 49% { opacity: 1; }
+	50%, 100% { opacity: 0; }
 }
 
 /* A listing the program wrote itself: columns already aligned in the

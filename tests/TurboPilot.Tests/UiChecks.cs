@@ -254,13 +254,14 @@ internal static class UiChecks
 			for (var attempt = 0; attempt < 100 && !rendered; attempt++)
 			{
 				using var result = JsonDocument.Parse(await webView.CoreWebView2.ExecuteScriptAsync(
-					"({bold: Array.from(document.querySelectorAll('#output strong')).some(e => e.textContent === 'UI streaming reply'), diagram: !!document.querySelector('#output svg')})"));
+					"({bold: Array.from(document.querySelectorAll('#output strong')).some(e => e.textContent === 'UI streaming reply'), diagram: !!document.querySelector('#output .mermaid-container > svg')})"));
 				rendered = result.RootElement.GetProperty("bold").GetBoolean()
 					&& result.RootElement.GetProperty("diagram").GetBoolean();
 				if (!rendered)
 					await Task.Delay(100);
 			}
 			Check.True(rendered, "The Rendered tab must render streamed markdown and a Mermaid diagram.");
+			await CheckToolRowsAsync(webView, chat);
 			await CheckTranscriptSaveAsync(window);
 			CheckSessionDetailsNotice(window);
 			SetInput(window, "unsent draft");
@@ -545,11 +546,25 @@ internal static class UiChecks
 		Console.WriteLine("PASS typed commands: completion list, keys, and local answer without a turn");
 	}
 
+	/// <summary>CLIPBRD_E_CANT_OPEN: some other program has the clipboard open.</summary>
+	private const int ClipboardHeldElsewhere = unchecked((int)0x800401D0);
+
 	private static void CheckPlainTextPaste(MainWindow window)
 	{
 		var input = Control<RichTextBox>(window, "richTextBoxInput");
 		var previousInput = Input(window);
-		var previousClipboard = Clipboard.GetDataObject();
+		IDataObject? previousClipboard;
+		try
+		{
+			previousClipboard = Clipboard.GetDataObject();
+		}
+		catch (System.Runtime.InteropServices.COMException error) when (error.HResult == ClipboardHeldElsewhere)
+		{
+			// The whole desktop shares one clipboard, so a program that keeps
+			// it open fails this check for a reason the check cannot test.
+			Console.WriteLine("SKIP plain-text paste: another program is holding the clipboard open");
+			return;
+		}
 		const string plainText = "plain clipboard representation";
 		try
 		{
@@ -917,6 +932,84 @@ internal static class UiChecks
 	}
 
 	/// <summary>
+	/// Tool calls in the Rendered tab, fed through the live session's event
+	/// handler. What matters is that a run of calls folds into one line that
+	/// counts them, that a line the reader opened stays open while more
+	/// output arrives and the document is drawn again, that a diagram
+	/// already drawn is carried through those renders rather than drawn
+	/// again, and that an answer handed back through the finishing tool is
+	/// drawn as the markdown it is.
+	/// </summary>
+	private static async Task CheckToolRowsAsync(WebView2 webView, ChatService chat)
+	{
+		async Task<bool> TrueAsync(string script) =>
+			JsonSerializer.Deserialize<bool>(await webView.CoreWebView2.ExecuteScriptAsync(script));
+		void Call(string id, string name, string arguments, string outcome, bool success = true)
+		{
+			chat.HandleSessionEvent(GitHub.Copilot.SessionEvent.FromJson(JsonSerializer.Serialize(new
+			{
+				type = "tool.execution_start",
+				data = new { toolCallId = id, toolName = name, arguments = JsonDocument.Parse(arguments).RootElement },
+			})));
+			chat.HandleSessionEvent(GitHub.Copilot.SessionEvent.FromJson(JsonSerializer.Serialize(new
+			{
+				type = "tool.execution_complete",
+				data = success
+					? (object)new { toolCallId = id, success, result = new { content = outcome } }
+					: new { toolCallId = id, success, error = new { message = outcome } },
+			})));
+		}
+		async Task<string> LastFoldAsync(string wanted)
+		{
+			var seen = "";
+			for (var attempt = 0; attempt < 100 && seen != wanted; attempt++)
+			{
+				if (attempt > 0)
+					await Task.Delay(100);
+				seen = JsonSerializer.Deserialize<string>(await webView.CoreWebView2.ExecuteScriptAsync(
+					"(function () { var folds = document.querySelectorAll('#output details.kp-tools');" +
+					" var last = folds[folds.length - 1]; if (!last) return '';" +
+					" var failed = last.querySelector(':scope > summary .kp-tools-failed');" +
+					" return last.querySelector(':scope > summary .kp-tools-text').textContent" +
+					" + '|' + (failed ? failed.textContent : '') + '|' + (last.open ? 'open' : 'shut'); })()")) ?? "";
+			}
+			return seen;
+		}
+
+		Check.True(await TrueAsync("(function () { var drawn = document.querySelector('#output .mermaid-container > svg');" +
+				" if (drawn) drawn.setAttribute('data-ui-kept', '1'); return !!drawn; })()"),
+			"The diagram drawn above must still be on screen.");
+		Call("ui-tool-1", "view", """{"path":"README.md"}""", "# Readme");
+		Call("ui-tool-2", "view", """{"path":"missing.md"}""", "Path does not exist", success: false);
+		Check.Equal("2 calls: view x2|1 failed|shut", await LastFoldAsync("2 calls: view x2|1 failed|shut"),
+			"A run of tool calls folds into one shut line that counts them");
+
+		await webView.CoreWebView2.ExecuteScriptAsync(
+			"(function () { var folds = document.querySelectorAll('#output details.kp-tools'); folds[folds.length - 1].open = true; })()");
+		Call("ui-tool-3", "rg", """{"pattern":"TODO"}""", "No matches");
+		Check.Equal("3 calls: view x2, rg|1 failed|open", await LastFoldAsync("3 calls: view x2, rg|1 failed|open"),
+			"A line the reader opened stays open while more calls arrive");
+
+		Call("ui-tool-4", "task_complete", """{"summary":"**UI finishing reply** after the tools."}""",
+			"**UI finishing reply** after the tools.");
+		var replied = false;
+		for (var attempt = 0; attempt < 100 && !replied; attempt++)
+		{
+			replied = await TrueAsync(
+				"Array.from(document.querySelectorAll('#output strong')).some(e => e.textContent === 'UI finishing reply')" +
+				" && !Array.from(document.querySelectorAll('#output .kp-tool-name')).some(e => e.textContent === 'task_complete')");
+			if (!replied)
+				await Task.Delay(100);
+		}
+		Check.True(replied, "The finishing tool's answer must be drawn as markdown, not as a tool row.");
+		Check.Equal("3 calls: view x2, rg|1 failed|open", await LastFoldAsync("3 calls: view x2, rg|1 failed|open"),
+			"The reply ends the run and leaves the line the reader opened open");
+		Check.True(await TrueAsync("!!document.querySelector('#output .mermaid-container > svg[data-ui-kept]')"),
+			"A drawn diagram must be carried through later renders, not drawn again.");
+		Console.WriteLine("PASS tool calls folded by run, kept open across renders, diagrams kept drawn, and the finishing answer drawn as the reply");
+	}
+
+	/// <summary>
 	/// The Session menu's Save Transcript, taken through the live renderer
 	/// rather than the formatter alone, so the saved page is the document
 	/// that is actually on screen.
@@ -929,6 +1022,7 @@ internal static class UiChecks
 		Check.True(page!.Contains("<strong>UI streaming reply</strong>"),
 			"The saved page must carry the rendered document, not the markdown it came from");
 		Check.True(page.Contains("<svg"), "A diagram is already drawn on screen and must be saved drawn");
+		Check.True(page.Contains("<details class=\"kp-tools\""), "A run of tool calls is saved folded, as it is on screen");
 		Check.True(page.Contains("data:font/ttf;base64,"), "The saved page must carry the face it is read in");
 		Check.True(!page.Contains("<script"), "A saved transcript must not carry script");
 

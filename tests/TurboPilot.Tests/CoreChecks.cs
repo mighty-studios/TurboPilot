@@ -29,8 +29,9 @@ internal static class CoreChecks
 		CheckStorage();
 		await CheckQuestionsAsync();
 		await CheckEventsAsync();
+		await CheckToolRowsAsync();
 		CheckHistoryAndStatus();
-		Console.WriteLine("PASS configuration, history storage, questions, streaming events, usage, prompt navigation, and external tools");
+		Console.WriteLine("PASS configuration, history storage, questions, streaming events, tool rows, usage, prompt navigation, and external tools");
 	}
 
 	/// <summary>
@@ -669,6 +670,45 @@ internal static class CoreChecks
 		chat.HandleSessionEvent(SessionEvent.FromJson("""{"type":"session.mcp_servers_loaded","data":{"servers":[{"name":"fixture","status":"failed","error":"Connection refused"}]}}"""));
 		Check.Equal(1, chat.Transcript.Split("Connection refused").Length - 1, "Surface server failures without duplicate notices");
 		Check.Equal(0, errors.Count, "All event fixtures must be processed");
+	}
+
+	/// <summary>
+	/// Tool calls as the two tabs show them. What matters is that an
+	/// answer handed back through the finishing tool reads as a reply
+	/// rather than as one more shut row, that a failure stays in Raw
+	/// without a notice splitting a run of rows apart in Rendered, and
+	/// that no row still looks busy once its turn is over.
+	/// </summary>
+	private static async Task CheckToolRowsAsync()
+	{
+		await using var chat = new ChatService();
+		var errors = new List<string>();
+		chat.ErrorReceived += errors.Add;
+		void Send(string json) => chat.HandleSessionEvent(SessionEvent.FromJson(json));
+
+		Send("""{"type":"assistant.turn_start","data":{"turnId":"turn-1"}}""");
+		Send("""{"type":"tool.execution_start","data":{"toolCallId":"c1","toolName":"view","arguments":{"path":"missing.md"}}}""");
+		Send("""{"type":"tool.execution_complete","data":{"toolCallId":"c1","success":false,"error":{"message":"Path does not exist"}}}""");
+		Send("""{"type":"tool.execution_start","data":{"toolCallId":"c2","toolName":"rg","arguments":{"pattern":"TODO"}}}""");
+		Send("""{"type":"tool.execution_start","data":{"toolCallId":"c3","toolName":"task_complete","arguments":{"summary":"**Finished.** Nothing was left to do."}}}""");
+		Send("""{"type":"tool.execution_complete","data":{"toolCallId":"c3","success":true,"result":{"content":"**Finished.** Nothing was left to do."}}}""");
+		Send("""{"type":"session.idle","data":{}}""");
+		await chat.WhenRenderedAsync();
+
+		var raw = chat.Transcript;
+		var rendered = chat.RenderedTranscript;
+		Check.True(raw.Contains("\r\n[tool] view failed: Path does not exist\r\n"),
+			"Raw keeps the failure line: " + raw);
+		Check.True(rendered.Contains("<div class=\"kp-tool kp-tool-failed\">") && !rendered.Contains("view failed:"),
+			"Rendered marks a failure in its row, not in a notice between rows: " + rendered);
+		Check.True(raw.Contains("\r\n**Finished.** Nothing was left to do.\r\n") && !raw.Contains("[tool] task_complete"),
+			"Raw shows the finishing answer as a reply, not as a tool line: " + raw);
+		Check.Equal(1, rendered.Split("**Finished.** Nothing was left to do.").Length - 1,
+			"Rendered shows the finishing answer once, as markdown, and not its echo");
+		Check.True(!rendered.Contains(">task_complete<"), "The finishing tool is not drawn as a row: " + rendered);
+		Check.True(rendered.Contains("<div class=\"kp-tool kp-tool-stopped\">") && !rendered.Contains("kp-tool-running"),
+			"A call that never reported back is stopped once its turn ends: " + rendered);
+		Check.Equal(0, errors.Count, "All tool fixtures must be processed: " + string.Join("; ", errors));
 	}
 
 	private static void CheckHistoryAndStatus()
