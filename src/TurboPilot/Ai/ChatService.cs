@@ -890,10 +890,10 @@ public sealed partial class ChatService : IAsyncDisposable
 	/// Finishes the card a tool call opened: marks it done or failed and
 	/// files the output inside it.
 	///
-	/// Raw is a record of the stream and stays as first printed, except
-	/// for a failure, which is written out as its own line. A tool that
-	/// went wrong is the thing a user scrolls back for, and it should
-	/// not be reachable only by opening a disclosure.
+	/// Raw keeps the tool result as plain text as well as the initial
+	/// tool line. The Rendered card can replace its contents in place,
+	/// but Raw must retain the complete stream without requiring the
+	/// reader to open a disclosure.
 	/// </summary>
 	private void ShowToolComplete(ToolExecutionCompleteData data)
 	{
@@ -905,10 +905,14 @@ public sealed partial class ChatService : IAsyncDisposable
 				return;
 		}
 
+		var rawOutcome = data.Success
+			? data.Result?.Content ?? string.Empty
+			: string.IsNullOrWhiteSpace(data.Error?.Message) ? "Failed." : data.Error!.Message;
 		var outcome = ToolDetail.Outcome(data.Success, data.Error?.Message, data.Result?.Content);
 		var card = NoticeFormatter.Tool(started.Name, started.Headline, started.Body,
 			data.Success ? "ok" : "failed", outcome);
 		ReplaceRendered(id, card.Rendered);
+		AppendRawToolResult(rawOutcome);
 		if (!data.Success)
 			AddNotice("[tool] " + started.Name + " failed: " + ShortText.Clip(outcome, 200));
 	}
@@ -1022,8 +1026,38 @@ public sealed partial class ChatService : IAsyncDisposable
 					_transcriptWriteFailed = true;
 				}
 			}
+
 			TranscriptReceived?.Invoke(text);
 			AppendRendered(rendered ?? text, messageId);
+		}
+	}
+
+	private void AppendRawToolResult(string outcome)
+	{
+		if (string.IsNullOrEmpty(outcome))
+			return;
+		lock (_sync)
+		{
+			var text = "\r\n[tool result]\r\n" + outcome + "\r\n\r\n";
+			_transcript.Append(text);
+			if (_record is not null && _historyActive)
+			{
+				try
+				{
+					if (_transcriptWriteFailed)
+						_store.WriteTranscript(_record.SessionId, _transcript.ToString());
+					else
+						_store.AppendTranscript(_record.SessionId, text);
+					_transcriptWriteFailed = false;
+				}
+				catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+				{
+					if (!_transcriptWriteFailed)
+						ErrorReceived?.Invoke("Cannot save the transcript; it remains in memory: " + ex.Message);
+					_transcriptWriteFailed = true;
+				}
+			}
+			TranscriptReceived?.Invoke(text);
 		}
 	}
 

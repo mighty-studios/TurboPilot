@@ -188,6 +188,8 @@ internal static class RuntimeChecks
 				// leave a card, and each says how it ended.
 				Check.True(resumed.Transcript.Contains("[tool] powershell  Write-Output TurboPilotPermissionProbe"),
 					"Name the command a shell tool ran, not just the tool: " + resumed.Transcript);
+				Check.True(resumed.Transcript.Contains("[tool result]\r\nTurboPilotPermissionProbe"),
+					"Keep the complete tool result in the Raw transcript: " + resumed.Transcript);
 				Check.True(resumed.RenderedTranscript.Contains("kp-tool-ok")
 					&& resumed.RenderedTranscript.Contains("TurboPilotPermissionProbe"),
 					"An approved tool card must carry its outcome.");
