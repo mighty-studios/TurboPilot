@@ -179,6 +179,57 @@ internal static class UiChecks
 		finally { application.DispatcherUnhandledException -= OnUnhandled; }
 	}
 
+	private static async Task CheckRenderedUserPromptStyleAsync(MainWindow window, WebView2 webView)
+	{
+		window.ClearOutput();
+		window.AppendOutput(
+			"\r\n<!--kp-user-prompt-start-->\r\n\r\n" +
+			"**You:** first prompt marker\r\n\r\nsecond prompt paragraph\r\n\r\n" +
+			"<!--kp-user-prompt-end-->\r\n\r\nAssistant reply marker\r\n\r\n");
+
+		const string script = """
+			(() => {
+				const prompts = document.querySelectorAll('#output .kp-user-prompt');
+				const first = prompts[0];
+				const second = prompts[1];
+				const assistant = Array.from(document.querySelectorAll('#output p'))
+					.find(p => p.textContent === 'Assistant reply marker');
+				return {
+					count: prompts.length,
+					firstText: first ? first.textContent : '',
+					secondText: second ? second.textContent : '',
+					color: first ? getComputedStyle(first).color : '',
+					size: first ? parseFloat(getComputedStyle(first).fontSize) : 0,
+					family: first ? getComputedStyle(first).fontFamily : '',
+					labelColor: first && first.querySelector('strong')
+						? getComputedStyle(first.querySelector('strong')).color : '',
+					assistantStyled: assistant ? assistant.classList.contains('kp-user-prompt') : true,
+					assistantColor: assistant ? getComputedStyle(assistant).color : ''
+				};
+			})()
+			""";
+		var matched = false;
+		for (var attempt = 0; attempt < 100 && !matched; attempt++)
+		{
+			using var result = JsonDocument.Parse(await webView.CoreWebView2.ExecuteScriptAsync(script));
+			var root = result.RootElement;
+			matched = root.GetProperty("count").GetInt32() == 2
+				&& root.GetProperty("firstText").GetString() == "You: first prompt marker"
+				&& root.GetProperty("secondText").GetString() == "second prompt paragraph"
+				&& root.GetProperty("color").GetString() == "rgb(255, 255, 0)"
+				&& Math.Abs(root.GetProperty("size").GetDouble() - 16) < 0.01
+				&& root.GetProperty("family").GetString()!.Contains("Px437 IBM VGA 9x16", StringComparison.Ordinal)
+				&& root.GetProperty("labelColor").GetString() == "rgb(255, 255, 0)"
+				&& !root.GetProperty("assistantStyled").GetBoolean()
+				&& root.GetProperty("assistantColor").GetString() != "rgb(255, 255, 0)";
+			if (!matched)
+				await Task.Delay(100);
+		}
+		Check.True(matched, "Render the full user prompt in its input font and yellow without recoloring the reply.");
+		window.ClearOutput();
+		Console.WriteLine("PASS Rendered user prompt styling in WebView2");
+	}
+
 	private static async Task RunWindowChecksAsync(Application application)
 	{
 		using var workspace = new TestWorkspace();
@@ -210,6 +261,7 @@ internal static class UiChecks
 			window.Show();
 			await Check.UntilAsync(() => Field<bool>(window, "_webViewReady"), "The rendered output did not initialize.");
 			await CheckPromptLayoutAsync(window);
+			await CheckRenderedUserPromptStyleAsync(window, webView);
 
 			var starting = InvokeTask(window, "StartChatAsync", options, null);
 			Check.True(Status(window).StartsWith("Starting.."), "Show Starting while connecting.");

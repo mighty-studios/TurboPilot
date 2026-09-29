@@ -263,6 +263,26 @@
 		return marked.parse(content || "");
 	}
 
+	function styleUserPromptEchoes(root) {
+		var withinPrompt = false;
+		for (var node = root.firstChild; node;) {
+			var next = node.nextSibling;
+			if (node.nodeType === Node.COMMENT_NODE) {
+				var marker = node.nodeValue ? node.nodeValue.trim() : "";
+				if (marker === "kp-user-prompt-start") {
+					withinPrompt = true;
+					root.removeChild(node);
+				} else if (marker === "kp-user-prompt-end") {
+					withinPrompt = false;
+					root.removeChild(node);
+				}
+			} else if (withinPrompt && node.nodeType === Node.ELEMENT_NODE) {
+				node.classList.add("kp-user-prompt");
+			}
+			node = next;
+		}
+	}
+
 	/**
 	 * Runs highlight.js over every fenced block under root. Mermaid fences
 	 * are skipped: they are diagrams in waiting, not code, and coloring
@@ -577,6 +597,7 @@
 	function renderTranscript(withDiagrams) {
 		var shown = disclosureState(outputEl);
 		outputEl.innerHTML = renderMarkdown(transcriptText);
+		styleUserPromptEchoes(outputEl);
 		foldToolRuns(outputEl);
 		restoreDisclosures(outputEl, shown);
 		highlightCodeIn(outputEl);

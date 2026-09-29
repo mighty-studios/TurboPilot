@@ -41,7 +41,18 @@ internal static class RenderingChecks
 		Check.Equal(0, notes.Count, "Readable files must not produce notices");
 		Console.WriteLine("PASS rule-based Rendered links, image previews, workspace name lookup, and protected regions");
 
+		CheckUserPromptStyle();
 		CheckNotices();
+	}
+
+	private static void CheckUserPromptStyle()
+	{
+		var css = BorlandVisionTheme.BuildCss();
+		Check.True(css.Contains("#output .kp-user-prompt{color:#FFFF00;font-size:1.143em;}", StringComparison.Ordinal),
+			"Match the User Prompt editor's yellow and 16-pixel font size.");
+		Check.True(css.Contains("#output .kp-user-prompt *{color:#FFFF00;}", StringComparison.Ordinal),
+			"Keep nested Markdown in the user prompt yellow.");
+		Console.WriteLine("PASS Rendered user prompt typography");
 	}
 
 	private static void CheckNotices()

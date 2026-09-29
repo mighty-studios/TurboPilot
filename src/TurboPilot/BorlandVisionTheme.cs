@@ -99,6 +99,9 @@ public static class BorlandVisionTheme
 		public const string RawBackground = Palette.MidBlue;
 		public const string RawForeground = Palette.Yellow;
 
+		/// <summary>The WPF named yellow used by the User Prompt editor.</summary>
+		public const string UserPromptForeground = "#FFFF00";
+
 		/// <summary>Recessed panels: code, diagrams, tool output.</summary>
 		public const string PanelBackground = Palette.Black;
 		public const string PanelBorder = Palette.DarkGray;
@@ -227,6 +230,10 @@ public static class BorlandVisionTheme
 			Palette.Yellow),
 		new(".block-user .block-content", "User prompt text",
 			Palette.White),
+		new("#output .kp-user-prompt", "User prompt echo: match the editor's font size and yellow",
+			Semantic.UserPromptForeground, "", RawFontSize / BaseFontSizePx),
+		new("#output .kp-user-prompt *", "User prompt echo formatting: keep the editor's yellow",
+			Semantic.UserPromptForeground),
 		new(".block-assistant .block-label", "Assistant label",
 			Palette.LightGreen),
 		new(".block-assistant .block-content", "Assistant text",

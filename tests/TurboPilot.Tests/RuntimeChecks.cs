@@ -88,6 +88,10 @@ internal static class RuntimeChecks
 			Check.True(!request.Contains("DISABLED_INSTRUCTION_SENTINEL") && !request.Contains("DISABLED_SKILL_SENTINEL"), "Exclude disabled content from the actual request.");
 			Check.True(!request.Contains("UNSELECTED_WORKSPACE_INSTRUCTION_SENTINEL"), "Disable implicit workspace instruction loading.");
 			Check.True(chat.Transcript.Contains("**You:** first prompt marker"), "Preserve the user's original prompt.");
+			Check.True(!chat.Transcript.Contains("kp-user-prompt")
+				&& chat.RenderedTranscript.Contains("<!--kp-user-prompt-start-->")
+				&& chat.RenderedTranscript.Contains("<!--kp-user-prompt-end-->"),
+				"Style only the Rendered user prompt echo.");
 			firstTranscript = chat.Transcript;
 			Check.Equal(firstTranscript, workspace.Store.ReadTranscript(sessionId), "Persist streamed output before ending the session");
 			Check.True(chat.ContextUsedTokens > 0, "Receive runtime context usage.");

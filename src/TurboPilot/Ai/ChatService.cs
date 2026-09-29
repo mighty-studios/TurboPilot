@@ -1053,7 +1053,9 @@ public sealed partial class ChatService : IAsyncDisposable
 				}
 				_store.Save(_record);
 			}
-			EmitTranscript($"\r\n**You:** {(string.IsNullOrWhiteSpace(prompt) ? "(attachments)" : prompt)}\r\n\r\n");
+			var userPrompt = $"**You:** {(string.IsNullOrWhiteSpace(prompt) ? "(attachments)" : prompt)}";
+			EmitTranscript($"\r\n{userPrompt}\r\n\r\n",
+				rendered: $"\r\n<!--kp-user-prompt-start-->\r\n\r\n{userPrompt}\r\n\r\n<!--kp-user-prompt-end-->\r\n\r\n");
 		}
 	}
 
