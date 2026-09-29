@@ -276,6 +276,7 @@ internal static class UiChecks
 				"Offer the context actions of a running session.");
 			CheckTools(application, window, workspace);
 			CheckSettingsCaptions(workspace);
+			CheckReasoningEffortDefaults(workspace);
 			CheckPastSessionsLayout(window);
 			CheckPastSessionsDelete(application, window, workspace);
 			CheckPromptReferences(window);
@@ -1027,6 +1028,57 @@ internal static class UiChecks
 			combo.ItemsSource = new[] { model.DisplayLabel };
 			combo.SelectedIndex = 0;
 			return dialog;
+		}
+	}
+
+	private static void CheckReasoningEffortDefaults(TestWorkspace workspace)
+	{
+		var suffix = Guid.NewGuid().ToString("N");
+		var firstEfforts = new[] { "low-" + suffix, "high-" + suffix };
+		var secondEfforts = new[] { "low-" + suffix, "medium-" + suffix, "maximum-" + suffix };
+		var models = (IReadOnlyList<AvailableModel>)
+		[
+			new AvailableModel
+			{
+				Id = "reasoning-model-one",
+				SupportsReasoningEffort = true,
+				ReasoningEfforts = firstEfforts,
+				DefaultReasoningEffort = firstEfforts[0],
+			},
+			new AvailableModel
+			{
+				Id = "reasoning-model-two",
+				SupportsReasoningEffort = true,
+				ReasoningEfforts = secondEfforts,
+				DefaultReasoningEffort = secondEfforts[0],
+			},
+		];
+		var dialog = new SettingsDialog(workspace.Workspace, null);
+		try
+		{
+			SetField(dialog, "_models", models);
+			var comboModel = Control<ComboBox>(dialog, "comboModel");
+			comboModel.ItemsSource = models.Select(model => model.DisplayLabel).ToArray();
+			var comboEffort = Control<ComboBox>(dialog, "comboEffort");
+
+			comboModel.SelectedIndex = 0;
+			Check.Equal(firstEfforts[^1], comboEffort.SelectedItem as string,
+				"Select the highest reasoning effort for the initial model.");
+
+			comboEffort.SelectedIndex = 0;
+			comboModel.SelectedIndex = 1;
+			Check.Equal(secondEfforts[^1], comboEffort.SelectedItem as string,
+				"Reset to the highest reasoning effort when changing models.");
+
+			comboEffort.SelectedIndex = 0;
+			comboModel.SelectedIndex = 0;
+			Check.Equal(firstEfforts[^1], comboEffort.SelectedItem as string,
+				"Reset to the highest reasoning effort when returning to a model.");
+			Console.WriteLine("PASS highest reasoning effort selected on model changes");
+		}
+		finally
+		{
+			dialog.Close();
 		}
 	}
 

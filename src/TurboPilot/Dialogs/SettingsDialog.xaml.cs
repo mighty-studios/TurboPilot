@@ -316,13 +316,7 @@ public partial class SettingsDialog : TurbolandFloatingDialog
 		if (model.SupportsReasoningEffort && model.ReasoningEfforts.Count > 0)
 		{
 			SetComboItems(comboEffort, model.ReasoningEfforts);
-			var saved = Settings.Load().SelectedEffort;
-			var effortIndex = model.ReasoningEfforts.ToList()
-				.FindIndex(e => string.Equals(e, saved, StringComparison.OrdinalIgnoreCase));
-			comboEffort.SelectedIndex = effortIndex >= 0
-				? effortIndex
-				: Math.Max(0, model.ReasoningEfforts.ToList()
-					.FindIndex(e => string.Equals(e, model.DefaultReasoningEffort, StringComparison.OrdinalIgnoreCase)));
+			comboEffort.SelectedIndex = model.ReasoningEfforts.Count - 1;
 			labelEffort.IsEnabled = true;
 			comboEffort.IsEnabled = true;
 		}
