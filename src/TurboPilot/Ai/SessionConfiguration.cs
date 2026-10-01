@@ -1,5 +1,6 @@
 using System.IO;
 using GitHub.Copilot;
+using TurboPilot.Commands;
 using TurboPilot.Customizations;
 using YamlDotNet.RepresentationModel;
 
@@ -78,6 +79,7 @@ internal static class SessionConfiguration
 			.Where(item => !item.Enabled && !config.McpServers.ContainsKey(item.Name))
 			.Select(item => item.Name).ToList();
 
+		parts.Add(PromptReferences.SystemInstructions);
 		parts.Add(ApplicationInstructions.Read(applicationInstructionsPath));
 		config.SystemMessage = new SystemMessageConfig
 		{

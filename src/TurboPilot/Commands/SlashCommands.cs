@@ -96,6 +96,9 @@ internal static class SlashCommands
 		var lines = new List<string>();
 		foreach (var command in All)
 			lines.Add(command.Name.PadRight(width) + "  " + command.Summary);
+		lines.Add("");
+		lines.Add("[f".PadRight(width) + "  Reference a pending attachment as [file:name]");
+		lines.Add("[s".PadRight(width) + "  Request a loaded skill as [skill:name]");
 		return string.Join(Environment.NewLine, lines);
 	}
 }

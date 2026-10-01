@@ -29,3 +29,10 @@ Adds your own items to a session.
 - Enabled **Agents** show up as session Modes; enabled **Instructions** and **Skills** load per the Settings toggles.
 - **Save/Load Options** carry the enabled-item choices (not the folder list).
 
+## 4. Typed commands
+
+Type `/` as the first non-space character in the User Prompt area to open the command list. Continue typing to filter it, then press Enter or Tab, or click an item, to complete the command. A command must occupy the whole prompt on one line; use `/help` to print the full command list in the transcript.
+
+## 5. Prompt references
+
+Type `[f` in the User Prompt area to choose a pending attachment and insert `[file:name]`. Type `[s` to choose an enabled skill loaded in the current session and insert `[skill:name]`. Continue typing the full prefix, such as `[file:read` or `[skill:dou`, to filter the list.

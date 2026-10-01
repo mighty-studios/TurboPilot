@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Interop;
 using TurboPilot.Customizations;
 using TurbolandTheme.Wpf.Controls;
+using PromptReferenceMarkers = TurboPilot.Commands.PromptReferences;
 
 namespace TurboPilot.Dialogs;
 
@@ -264,17 +265,15 @@ public partial class CustomizeDialog : TurbolandFloatingDialog
 	}
 
 	/// <summary>
-	/// The line that names one item to the model. A file the model can
-	/// read is named by its path; everything else is named the way the
-	/// runtime knows it, because a skill is invoked by name and a path
-	/// to it would only be a file to open.
+	/// The compact marker that names one item to the model. Prompt and
+	/// instruction files are attached when the marker is sent.
 	/// </summary>
 	internal string ReferenceFor(CustomizationItem item) => TypeNameFor(item) switch
 	{
-		"Skill" => $"Use the \"{item.Name}\" skill.",
+		"Skill" => PromptReferenceMarkers.SkillMarker(item.Name),
 		"Agent" => $"Use the \"{item.Name}\" agent.",
 		"MCP Server" => $"Use the \"{item.Name}\" MCP server.",
-		_ => $"Read {item.FilePath} first.",
+		_ => PromptReferenceMarkers.FileMarker(Path.GetFileName(item.FilePath)),
 	};
 
 	/// <summary>

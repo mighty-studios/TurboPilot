@@ -34,6 +34,7 @@ public partial class MainWindow : TurbolandWindow
 
 	// Attachments tracking
 	private readonly List<string> _attachments = new();
+	private PromptReferenceCompletion? _referenceCompletion;
 
 	// Prompts sent this run, cycled through by the arrows beside the input
 	// box. Kept across sessions: ending a session drops the live
@@ -123,9 +124,10 @@ public partial class MainWindow : TurbolandWindow
 		// Ctrl+Enter sends the current input from anywhere in the window.
 		PreviewKeyDown += Input_PreviewKeyDown;
 
-		// Command completion follows what is typed in the prompt box.
+		// Command and reference completion follow the prompt and caret.
 		richTextBoxInput.TextChanged += Input_TextChanged;
-		richTextBoxInput.LostKeyboardFocus += (_, _) => commandPopup.IsOpen = false;
+		richTextBoxInput.SelectionChanged += Input_SelectionChanged;
+		richTextBoxInput.LostKeyboardFocus += (_, _) => ClosePromptCompletion();
 		DataObject.AddPastingHandler(richTextBoxInput, Input_Pasting);
 
 		// No session is active until the user starts or resumes one.
@@ -259,6 +261,7 @@ public partial class MainWindow : TurbolandWindow
 	private void UpdateAttachmentButton()
 	{
 		buttonAttachments.Content = $"+{_attachments.Count}";
+		RefreshPromptCompletion();
 	}
 
 	// ── WebView2 initialization ──────────────────────────────────────────────
@@ -756,18 +759,35 @@ public partial class MainWindow : TurbolandWindow
 	/// characters would show as one long line, which is not what the
 	/// user typed and not what the box reads back.
 	/// </summary>
-	private void SetInputText(string text)
+	private void SetInputText(string text) => SetInputTextAt(text, null);
+
+	private void SetInputTextAt(string text, int? caretOffset)
 	{
+		var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
+		var targetOffset = Math.Clamp(caretOffset ?? normalized.Length, 0, normalized.Length);
 		richTextBoxInput.Document.Blocks.Clear();
 		System.Windows.Documents.Paragraph? last = null;
-		foreach (var line in text.Replace("\r\n", "\n").Split('\n'))
+		System.Windows.Documents.TextPointer? target = null;
+		var lineOffset = 0;
+		foreach (var line in normalized.Split('\n'))
 		{
-			last = new System.Windows.Documents.Paragraph(new System.Windows.Documents.Run(line));
+			var run = new System.Windows.Documents.Run(line);
+			last = new System.Windows.Documents.Paragraph(run);
 			richTextBoxInput.Document.Blocks.Add(last);
+			if (target is null && targetOffset <= lineOffset + line.Length)
+			{
+				var column = targetOffset - lineOffset;
+				target = run.ContentStart.GetPositionAtOffset(column, System.Windows.Documents.LogicalDirection.Forward)
+					?? run.ContentEnd;
+			}
+			lineOffset += line.Length + 1;
 		}
-		if (last is not null)
+		if (target is not null)
+			richTextBoxInput.CaretPosition = target;
+		else if (last is not null)
 			richTextBoxInput.CaretPosition = last.ContentEnd;
 		richTextBoxInput.Focus();
+		RefreshPromptCompletion();
 	}
 
 	// ── Session settings ─────────────────────────────────────────────────────
@@ -1248,7 +1268,7 @@ public partial class MainWindow : TurbolandWindow
 		if (SlashCommands.Parse(text) is { } typed)
 		{
 			richTextBoxInput.Document.Blocks.Clear();
-			commandPopup.IsOpen = false;
+			ClosePromptCompletion();
 			await RunCommandAsync(typed.Command, chat);
 			return;
 		}
@@ -1261,7 +1281,24 @@ public partial class MainWindow : TurbolandWindow
 			UpdateHistoryButtons();
 		}
 
-		var attachments = _attachments.ToArray();
+		var options = chat.RequestedOptions;
+		var knownFiles = options.Customizations.Prompts.Values
+			.Concat(options.Customizations.Instructions.Values)
+			.Select(item => item.FilePath);
+		var skillNames = options.PreloadSkills
+			? options.Customizations.Skills.Values
+				.Where(item => item.Enabled)
+				.Select(item => item.Name)
+				.ToArray()
+			: Array.Empty<string>();
+		var resolution = PromptReferences.Resolve(text, _attachments, knownFiles, skillNames);
+		if (!resolution.Success)
+		{
+			chat.AddNotice("[error] " + resolution.Error);
+			return;
+		}
+
+		var attachments = resolution.Attachments.ToArray();
 		_sendingInput = true;
 		Sounds.PlayPromptSent();
 		SetSessionActive(IsSessionActive);
@@ -1295,11 +1332,23 @@ public partial class MainWindow : TurbolandWindow
 	/// </summary>
 	private string GetInputText()
 	{
-		var range = new System.Windows.Documents.TextRange(
-			richTextBoxInput.Document.ContentStart,
-			richTextBoxInput.Document.ContentEnd);
-		return range.Text.Trim();
+		return GetInputState().Text.Replace("\n", "\r\n").Trim();
 	}
+
+	private (string Text, int CaretOffset) GetInputState()
+	{
+		var documentStart = richTextBoxInput.Document.ContentStart;
+		var text = NormalizeInputText(new System.Windows.Documents.TextRange(
+			documentStart, richTextBoxInput.Document.ContentEnd).Text);
+		var beforeCaret = NormalizeInputText(new System.Windows.Documents.TextRange(
+			documentStart, richTextBoxInput.CaretPosition).Text);
+		if (text.EndsWith('\n'))
+			text = text[..^1];
+		return (text, Math.Min(beforeCaret.Length, text.Length));
+	}
+
+	private static string NormalizeInputText(string text) =>
+		text.Replace("\r\n", "\n").Replace('\r', '\n');
 
 	/// <summary>
 	/// Ctrl+Enter sends, like every other chat front end this machine has
@@ -1413,36 +1462,109 @@ public partial class MainWindow : TurbolandWindow
 	}
 
 	/// <summary>
-	/// Opens, refills, or closes the completion list for what has been
-	/// typed so far.
+	/// Opens, refills, or closes the completion list for the prompt and
+	/// current caret position.
 	/// </summary>
 	private void Input_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
+		=> RefreshPromptCompletion();
+
+	private void Input_SelectionChanged(object sender, RoutedEventArgs e)
+		=> RefreshPromptCompletion();
+
+	private void RefreshPromptCompletion()
 	{
-		var matches = SlashCommands.Suggest(GetInputText());
-		if (matches.Count == 0)
+		if (!richTextBoxInput.Selection.IsEmpty)
 		{
-			commandPopup.IsOpen = false;
+			ClosePromptCompletion();
 			return;
 		}
 
-		commandList.ItemsSource = matches;
+		var state = GetInputState();
+		if (state.CaretOffset == state.Text.Length)
+		{
+			var commands = SlashCommands.Suggest(state.Text);
+			if (commands.Count > 0)
+			{
+				_referenceCompletion = null;
+				ShowPromptCompletion(commands);
+				return;
+			}
+		}
+
+		var options = _chat?.RequestedOptions;
+		IEnumerable<CustomizationItem> skills = options is { PreloadSkills: true }
+			? options.Customizations.Skills.Values
+			: Array.Empty<CustomizationItem>();
+		var reference = PromptReferences.Suggest(
+			state.Text[..state.CaretOffset], _attachments, skills);
+		if (reference is null)
+		{
+			ClosePromptCompletion();
+			return;
+		}
+
+		_referenceCompletion = reference;
+		ShowPromptCompletion(reference.Suggestions);
+	}
+
+	/// <summary>
+	/// Accepts the highlighted command or reference. Commands replace the
+	/// whole prompt; references replace only their unfinished token.
+	/// </summary>
+	private void AcceptPromptCompletion()
+	{
+		switch (commandList.SelectedItem)
+		{
+			case SlashCommand command:
+				ClosePromptCompletion();
+				SetInputText(command.Name + " ");
+				break;
+			case PromptReferenceSuggestion suggestion when _referenceCompletion is { } completion:
+			{
+				var state = GetInputState();
+				if (completion.Start < 0
+					|| completion.Start + completion.Length > state.Text.Length)
+				return;
+				var after = completion.Start + completion.Length;
+				var insertion = suggestion.Marker;
+				if (after == state.Text.Length || IsWordCharacter(state.Text[after]))
+					insertion += " ";
+				var updated = state.Text.Remove(completion.Start, completion.Length)
+					.Insert(completion.Start, insertion);
+				ClosePromptCompletion();
+				SetInputTextAt(updated, completion.Start + insertion.Length);
+				break;
+			}
+		}
+	}
+
+	private static bool IsWordCharacter(char value) => char.IsLetterOrDigit(value) || value == '_';
+
+	private void ShowPromptCompletion(System.Collections.IEnumerable items)
+	{
+		commandList.ItemsSource = items;
 		commandList.SelectedIndex = 0;
 		commandPopup.IsOpen = true;
 	}
 
-	/// <summary>
-	/// Replaces what has been typed with the highlighted command. The
-	/// caret lands after a trailing space, because the commands that
-	/// take an argument are the ones worth completing.
-	/// </summary>
-	private void AcceptCommand()
+	private void ClosePromptCompletion()
 	{
-		if (commandList.SelectedItem is not SlashCommand command) return;
 		commandPopup.IsOpen = false;
-		SetInputText(command.Name + " ");
+		_referenceCompletion = null;
 	}
 
-	private void CommandList_Click(object sender, System.Windows.Input.MouseButtonEventArgs e) => AcceptCommand();
+	private void CommandList_PreviewMouseLeftButtonDown(
+		object sender,
+		System.Windows.Input.MouseButtonEventArgs e)
+	{
+		if (System.Windows.Controls.ItemsControl.ContainerFromElement(
+			commandList, e.OriginalSource as DependencyObject) is not System.Windows.Controls.ListBoxItem item)
+			return;
+
+		commandList.SelectedItem = item.DataContext;
+		AcceptPromptCompletion();
+		e.Handled = true;
+	}
 
 	/// <summary>
 	/// Keys the completion list claims while it is open. Enter and Tab
@@ -1455,11 +1577,11 @@ public partial class MainWindow : TurbolandWindow
 		switch (key)
 		{
 			case System.Windows.Input.Key.Escape:
-				commandPopup.IsOpen = false;
+				ClosePromptCompletion();
 				return true;
 			case System.Windows.Input.Key.Tab:
 			case System.Windows.Input.Key.Enter:
-				AcceptCommand();
+				AcceptPromptCompletion();
 				return true;
 			case System.Windows.Input.Key.Down:
 				commandList.SelectedIndex = (commandList.SelectedIndex + 1) % commandList.Items.Count;

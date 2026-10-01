@@ -238,7 +238,7 @@
                     <TextBlock x:Name="noticeTextBlock" Grid.Row="1" Margin="4,4,4,0"
 							TextWrapping="Wrap" MaxHeight="68" Visibility="Collapsed"
 							Foreground="{DynamicResource Turboland.Brush.WindowForeground}"/>
-                    <!-- Command completion. The prompt box is at the bottom of
+                    <!-- Prompt completion. The prompt box is at the bottom of
                          the window, so the list opens upward over the output
                          rather than off the bottom of the screen. It is a
                          popup and not a pane: nothing about it can widen the
@@ -249,15 +249,17 @@
                         <Border Background="{DynamicResource Turboland.Brush.ControlFace}"
 								BorderBrush="{DynamicResource Turboland.Brush.ControlShadow}"
 								BorderThickness="1">
-                            <ListBox x:Name="commandList" Width="420" MaxHeight="176"
+                            <ListBox x:Name="commandList" Width="520" MaxHeight="176"
 									Focusable="False" BorderThickness="0"
 									ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-									MouseLeftButtonUp="CommandList_Click">
+									PreviewMouseLeftButtonDown="CommandList_PreviewMouseLeftButtonDown">
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
                                         <StackPanel Orientation="Horizontal">
-                                            <TextBlock Text="{Binding Name}" Width="96"/>
-                                            <TextBlock Text="{Binding Summary}"/>
+                                            <TextBlock Text="{Binding Name}" Width="160"/>
+                                            <TextBlock Text="{Binding Summary}" Width="344"
+														TextTrimming="CharacterEllipsis"
+														ToolTip="{Binding Summary}"/>
                                         </StackPanel>
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>

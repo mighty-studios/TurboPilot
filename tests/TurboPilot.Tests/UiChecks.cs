@@ -280,7 +280,7 @@ internal static class UiChecks
 			CheckPastSessionsLayout(window);
 			CheckPastSessionsDelete(application, window, workspace);
 			CheckPromptReferences(window);
-			await CheckCommandsAsync(window);
+			await CheckCommandsAsync(window, workspace);
 			CheckChangeActions(application, window);
 
 			var reply = new LocalProvider.Reply("**UI streaming reply**\n\n```mermaid\ngraph TD\nA[Input] --> B[Output]\n```");
@@ -552,7 +552,7 @@ internal static class UiChecks
 	/// The list has to stay out of the layout, so what is checked is
 	/// that it lives in a popup and opens and closes on its own.
 	/// </summary>
-	private static async Task CheckCommandsAsync(MainWindow window)
+	private static async Task CheckCommandsAsync(MainWindow window, TestWorkspace workspace)
 	{
 		var popup = Control<Popup>(window, "commandPopup");
 		var list = Control<ListBox>(window, "commandList");
@@ -584,6 +584,52 @@ internal static class UiChecks
 		Check.True(!popup.IsOpen && Input(window) == "/he", "Escape must dismiss without editing the prompt");
 		Check.True(!(bool)Invoke(window, "HandleCommandKey", Key.Down)!,
 			"A dismissed list must hand its keys back to the editor.");
+
+		var attachments = Field<List<string>>(window, "_attachments");
+		var originalAttachments = attachments.ToArray();
+		try
+		{
+			var attachment = workspace.Write("workspace\\reference.txt", "Reference fixture.");
+			attachments.Clear();
+			attachments.Add(attachment);
+			Invoke(window, "UpdateAttachmentButton");
+
+			SetInput(window, "Compare [f later");
+			var paragraph = input.Document.Blocks.OfType<Paragraph>().Single();
+			var run = paragraph.Inlines.OfType<Run>().Single();
+			input.CaretPosition = run.ContentStart.GetPositionAtOffset(10)!;
+			Check.True(popup.IsOpen && list.Items.Count == 1,
+				"The [f trigger opens the pending attachment list.");
+			Check.True((bool)Invoke(window, "HandleCommandKey", Key.Tab)!,
+				"Tab accepts a file reference.");
+			Check.Equal("Compare [file:reference.txt] later", Input(window),
+				"A file completion replaces only its token at the caret and inserts only the filename.");
+
+			SetInput(window, "Apply [s");
+			Check.True(popup.IsOpen && list.Items.Count == 1,
+				"The [s trigger offers only enabled skills loaded in the session.");
+			list.UpdateLayout();
+			var skillItem = (ListBoxItem?)list.ItemContainerGenerator.ContainerFromIndex(0);
+			Check.True(skillItem is not null, "The skill completion row must be realized for mouse input.");
+			var click = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
+			{
+				RoutedEvent = UIElement.PreviewMouseLeftButtonDownEvent,
+				Source = skillItem,
+			};
+			Invoke(window, "CommandList_PreviewMouseLeftButtonDown", list, click);
+			Check.True(click.Handled, "A mouse click on a skill completion must be accepted before focus changes.");
+			Check.Equal("Apply [skill:enabled-skill]", Input(window),
+				"A clicked skill completion preserves the prompt and inserts its session name.");
+
+			SetInput(window, "Read [features]");
+			Check.True(!popup.IsOpen, "Ordinary Markdown link text must close reference completion.");
+		}
+		finally
+		{
+			attachments.Clear();
+			attachments.AddRange(originalAttachments);
+			Invoke(window, "UpdateAttachmentButton");
+		}
 
 		var chat = Field<ChatService>(window, "_chat");
 		var before = chat.Transcript.Length;
@@ -1219,10 +1265,10 @@ internal static class UiChecks
 			library.Prompts[prompt.FilePath] = prompt;
 			SetField(dialog, "_library", library);
 
-			Check.Equal("Use the \"pdf\" skill.", Invoke(dialog, "ReferenceFor", skill),
-				"A skill is named the way the runtime knows it");
-			Check.Equal($"Read {prompt.FilePath} first.", Invoke(dialog, "ReferenceFor", prompt),
-				"A file the model can read is named by its path");
+			Check.Equal("[skill:pdf]", Invoke(dialog, "ReferenceFor", skill),
+				"A skill uses the same marker as prompt completion");
+			Check.Equal("[file:review.md]", Invoke(dialog, "ReferenceFor", prompt),
+				"A customization file uses the same filename marker as an attachment");
 
 			var restore = Input(window);
 			try

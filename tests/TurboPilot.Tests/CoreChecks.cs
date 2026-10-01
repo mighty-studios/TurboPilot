@@ -23,6 +23,7 @@ internal static class CoreChecks
 		CheckShortText();
 		CheckArchiveLine();
 		CheckSlashCommands();
+		CheckPromptReferences();
 		CheckSessionDetails();
 		CheckWorkspaceChanges();
 		CheckSessionSnapshot();
@@ -285,11 +286,69 @@ internal static class CoreChecks
 			Check.True(SlashCommands.Parse(command.Name) is not null,
 				"Every listed command must parse: " + command.Name);
 		}
+		Check.True(listed.Contains("[file:name]") && listed.Contains("[skill:name]"),
+			"The local help output must explain both prompt reference triggers.");
 
 		var listing = NoticeFormatter.Listing("Commands", "/help  <b>");
 		Check.True(listing.Rendered.Contains("&lt;b&gt;", StringComparison.Ordinal)
 			&& listing.Rendered.Contains("kp-listing-body", StringComparison.Ordinal),
 			"A listing keeps its columns in a pre block and escapes what it shows.");
+	}
+
+	private static void CheckPromptReferences()
+	{
+		var attachment = @"C:\work\reference.txt";
+		var skill = new CustomizationItem
+		{
+			FilePath = @"C:\kit\skills\doublecheck\SKILL.md",
+			Name = "doublecheck",
+		};
+		var disabled = new CustomizationItem
+		{
+			FilePath = @"C:\kit\skills\disabled\SKILL.md",
+			Name = "disabled",
+			Enabled = false,
+		};
+
+		var file = PromptReferences.Suggest("Compare [f", [attachment], [skill, disabled]);
+		Check.True(file is { Start: 8, Length: 2 } && file.Suggestions.Count == 1,
+			"The [f trigger must find the unfinished token at the caret.");
+		Check.Equal("[file:reference.txt]", file!.Suggestions[0].Marker,
+			"A file completion inserts its display name, not its path.");
+
+		var filtered = PromptReferences.Suggest("Compare [file:ref", [attachment], [skill]);
+		Check.True(filtered is { Suggestions.Count: 1 },
+			"The canonical file prefix must filter the attachment list.");
+		Check.True(PromptReferences.Suggest("Read [features]", [attachment], [skill]) is null,
+			"Completed Markdown link text must not remain a reference trigger.");
+		Check.True(PromptReferences.Suggest("word[f", [attachment], [skill]) is null,
+			"A reference trigger must begin at a token boundary.");
+
+		var skills = PromptReferences.Suggest("Apply [s", [attachment], [skill, disabled]);
+		Check.True(skills is { Suggestions.Count: 1 }
+			&& skills.Suggestions[0].Marker == "[skill:doublecheck]",
+			"The [s trigger must offer enabled skills and exclude disabled ones.");
+
+		var customizationFile = @"C:\kit\prompts\review.md";
+		var resolved = PromptReferences.Resolve(
+			"Use [file:review.md], then [skill:doublecheck].",
+			[],
+			[customizationFile],
+			["doublecheck"]);
+		Check.True(resolved.Success && resolved.Attachments.SequenceEqual([customizationFile]),
+			"A customization file marker must attach that file before sending.");
+		Check.True(!PromptReferences.Resolve(
+			"Apply [skill:missing].", [], [], ["doublecheck"]).Success,
+			"An unavailable skill marker must fail explicitly.");
+		Check.True(!PromptReferences.Resolve(
+			"Read [file:same.txt].",
+			[@"C:\one\same.txt", @"C:\two\same.txt"],
+			[],
+			[]).Success,
+			"Duplicate attachment names must not resolve arbitrarily.");
+		Check.True(PromptReferences.SystemInstructions.Contains("[file:NAME]")
+			&& PromptReferences.SystemInstructions.Contains("[skill:NAME]"),
+			"The session instructions must define the marker protocol.");
 	}
 
 	/// <summary>
@@ -363,6 +422,8 @@ internal static class CoreChecks
 		SessionConfiguration.Apply(config, options, workspace.ApplicationInstructionsPath);
 		var system = config.SystemMessage!.Content!;
 		Check.True(system.Contains("ENABLED_INSTRUCTION_SENTINEL") && system.Contains("ENABLED_SKILL_SENTINEL"), "Enabled content must be preloaded.");
+		Check.True(system.Contains("[file:NAME]") && system.Contains("[skill:NAME]"),
+			"Every session must receive the compact prompt reference protocol.");
 		Check.True(!system.Contains("DISABLED_"), "Disabled content must not be preloaded.");
 		Check.True(system.Contains("**/*.cs"), "Instruction file scope must survive.");
 		Check.Equal(false, config.EnableConfigDiscovery, "Automatic discovery must not undo the user's choices");

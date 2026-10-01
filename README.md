@@ -52,6 +52,10 @@ Type `/` in the prompt box to see available commands. Common commands include:
 | `/save` | Save the transcript |
 | `/past` | Open saved sessions |
 
+## Inline Prompt References
+
+Type `[f` in the User Prompt area to choose from a list of pending file attachments and insert a reference like `[file:name]` to the prompt. Type `[s` to do the same using a list of enabled skills.
+
 ## Project context and instructions
 
 When a new workspace contains a root `README.md` or `README.txt`, TurboPilot offers to attach it to an opening prompt. The prompt asks the model to understand the project and wait for instructions without changing files.
